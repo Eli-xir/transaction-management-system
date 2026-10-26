@@ -90,6 +90,8 @@ def ledger(db, user_id=None, credits_only=False):
             'editorId': str(v['editor_id']), 'action': v['action'], 'amount': float(v['transaction_amount']),
             'headId': v['head_id'], 'description': v['description'], 'transactionTypeId': v['transaction_type_id'],
             'active': v['is_active'], 'headPath': v['head_path'],
+            'contractId': str(v['contract_id']) if v.get('contract_id') else None,
+            'contractName': v.get('contract_name', ''),
             'attachments': by_version.get(v['version_id'], [])})
     result = []
     for row in entries:
@@ -264,18 +266,20 @@ def revise(db, entry, editor_id, action, value=None, attachment_ids=None):
     head_id = value.headId if value else entry['head_id']
     category_id = None if value else entry['category_group_id']
     category_name = old['category_name'] if old else ''
+    contract_id = entry.get('contract_id')
+    contract_name = db.execute('SELECT name FROM contracts WHERE contract_id=%s', (contract_id,)).fetchone()['name'] if contract_id else ''
     version_id = db.execute('''INSERT INTO transaction_versions
-        (transaction_id,transaction_amount,transaction_type_id,editor_id,action,head_id,category_group_id,is_active,head_path,category_name,description)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING version_id''',
+        (transaction_id,transaction_amount,transaction_type_id,editor_id,action,head_id,category_group_id,is_active,head_path,category_name,description,contract_id,contract_name)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING version_id''',
         (entry['transaction_id'], value.amount if value else old['transaction_amount'], value.transactionTypeId if value else old['transaction_type_id'],
-         editor_id, action, head_id, category_id, entry['is_active'], path(db, head_id), category_name, value.description if value else old['description'])).fetchone()['version_id']
+         editor_id, action, head_id, category_id, entry['is_active'], path(db, head_id), category_name, value.description if value else old['description'], contract_id, contract_name)).fetchone()['version_id']
     if attachment_ids is None:
         attachment_ids = [r['attachment_id'] for r in db.execute('SELECT attachment_id FROM transaction_version_attachments WHERE version_id=%s', (entry['current_version_id'],)).fetchall()]
     for aid in attachment_ids:
         db.execute('INSERT INTO transaction_version_attachments VALUES (%s,%s)', (version_id, aid))
         db.execute('UPDATE attachments SET is_submitted=true WHERE attachment_id=%s', (aid,))
-    db.execute('UPDATE transactions SET current_version_id=%s,head_id=%s,category_group_id=%s,is_active=%s WHERE transaction_id=%s',
-               (version_id, head_id, category_id, entry['is_active'], entry['transaction_id']))
+    db.execute('UPDATE transactions SET current_version_id=%s,head_id=%s,category_group_id=%s,is_active=%s,contract_id=%s WHERE transaction_id=%s',
+               (version_id, head_id, category_id, entry['is_active'], contract_id, entry['transaction_id']))
 
 
 def transaction_change(db, actor, change):
@@ -285,7 +289,7 @@ def transaction_change(db, actor, change):
                 'Only the user can submit their own transaction. Admin preview cannot submit transactions.', 403)
     else:
         admin(actor)
-    require(change.contractId is None or (change.action == 'credit' and change.creditUserId is not None),
+    require(change.contractId is None or change.action == 'edit' or (change.action == 'credit' and change.creditUserId is not None),
             'Contracts only apply to receipts from external users.')
     if change.action in ('submit', 'credit'):
         user = account(db, change.userId)
@@ -309,6 +313,12 @@ def transaction_change(db, actor, change):
         entry = db.execute('SELECT * FROM transactions WHERE transaction_id=%s FOR UPDATE', (change.id,)).fetchone()
         require(entry, 'This transaction no longer exists.', 404)
         require(entry['current_version_id'] == change.expectedVersion, 'This entry changed. Close and reopen the card before editing.', 409)
+        assigning_contract = change.action == 'edit' and change.contractId is not None and not entry.get('contract_id')
+        if change.action == 'edit' and change.contractId is not None:
+            require(entry.get('credit_user_id'), 'Contracts only apply to receipts from external users.')
+            require(entry.get('contract_id') in (None, change.contractId), 'This receipt already belongs to a contract.')
+            require(entry['is_active'] or entry.get('contract_id') == change.contractId, 'Reactivate this receipt before assigning it to a contract.')
+            entry['contract_id'] = change.contractId
         if entry.get('contract_id'):
             db.execute('SELECT contract_id FROM contracts WHERE contract_id=%s FOR UPDATE', (entry['contract_id'],))
             if change.action == 'edit' and entry['is_active']:
@@ -324,7 +334,7 @@ def transaction_change(db, actor, change):
         if change.action == 'edit':
             creator = account(db, entry['created_by_user_id'])
             ids = validate_input(db, actor, change.input, entry['user_id'], direct=creator['user_role_id'] == 1)
-            revise(db, entry, actor['user_id'], 'Edited', change.input, ids)
+            revise(db, entry, actor['user_id'], 'Assigned to contract' if assigning_contract else 'Edited', change.input, ids)
         else:
             entry['is_active'] = change.action == 'reactivate'
             revise(db, entry, actor['user_id'], 'Reactivated' if entry['is_active'] else 'Deactivated')

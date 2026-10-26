@@ -1,4 +1,4 @@
-"""Contract totals are shared by all linked payers; receipts keep immutable attribution."""
+"""Contract totals are shared by all linked payers; attribution is saved in receipt versions."""
 from fastapi import HTTPException
 
 

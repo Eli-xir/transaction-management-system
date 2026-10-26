@@ -209,7 +209,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
       <button className="btn" onClick={() => setSelection({ scope, active: false, ids: new Set(), anchor: null, range: false })}>Cancel</button>
     </div>}
     {selected && data && <TransactionCard key={selected.id} entry={selected}
-      admin company={company} heads={data.heads} users={data.users} creditUsers={data.creditUsers} contracts={data.contracts}
+      admin company={company} heads={data.heads} users={data.users} creditUsers={data.creditUsers} contracts={data.contracts} transactions={data.transactions}
       onClose={() => { setSelected(null); setReload((value) => value + 1); }} onChanged={refresh} />}
 
   </div>;

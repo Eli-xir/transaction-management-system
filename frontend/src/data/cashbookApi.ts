@@ -52,7 +52,7 @@ export const cashbookApi = {
   userOverview: (userId: string) => request<UserOverview>(`/state?userId=${encodeURIComponent(userId)}`),
   submitTransaction: (userId: string, input: TransactionInput) => change<{ id: string; applied: boolean }>({ op: 'transaction', action: 'submit', userId, input }),
   creditUser: (userId: string, input: TransactionInput, creditUserId?: string, contractId?: string) => change<Transaction>({ op: 'transaction', action: 'credit', userId, creditUserId, contractId, input }),
-  editTransaction: (id: string, input: TransactionInput, expectedVersion: string) => change<Transaction>({ op: 'transaction', action: 'edit', id: Number(id), input, expectedVersion: Number(expectedVersion) }),
+  editTransaction: (id: string, input: TransactionInput, expectedVersion: string, contractId?: string) => change<Transaction>({ op: 'transaction', action: 'edit', id: Number(id), input, expectedVersion: Number(expectedVersion), contractId }),
   transactionAction: (id: string, action: 'deactivate' | 'reactivate' | 'delete', expectedVersion: string) => change<Transaction | null>({ op: 'transaction', action, id: Number(id), expectedVersion: Number(expectedVersion) }),
   async uploadAttachment(file: File, kind: Attachment['kind'], maxBytes = 5 * 1024 * 1024) {
     if (!file.size || file.size > maxBytes) throw new Error('Choose a file up to 5 MB.');

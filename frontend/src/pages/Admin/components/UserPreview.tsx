@@ -1,6 +1,8 @@
 import { Icon } from '../../../Icon';
 import { useEffect, useRef, useState } from 'react';
-import type { AdminUser, Attachment, CreditUser, Head, Transaction, UserOverview } from '../types';
+import type { AdminUser, Attachment, Contract, CreditUser, Head, Transaction, UserOverview } from '../types';
+import { ReceiptContractPicker } from './ReceiptContractPicker';
+import { contractBalance } from '../utils/contractBalances';
 import { permittedHeads } from '../utils/permissions';
 import { cashbookApi } from '../../../data/cashbookApi';
 import { AttachmentInput } from './AttachmentInput';
@@ -10,7 +12,7 @@ import { creditDocument } from '../../Ledger/ledgerExport';
 import { ReportActions } from '../../Ledger/ReportActions';
 import { creditUserScope, ledgerReport, money } from '../../Ledger/ledgerModel';
 
-type Screen = 'home' | 'heads' | 'images' | 'voice' | 'description' | 'review';
+type Screen = 'home' | 'heads' | 'contracts' | 'images' | 'voice' | 'description' | 'review';
 const ignoreChange = (_value: boolean) => {};
 
 export function UserPreview({ user, heads, assigned, pending, onClose, preview = true, adminCredit = false, creditUser, transactionLabel = 'Credit', onSubmitted, onRefresh,
@@ -31,6 +33,10 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [openedCredit, setOpenedCredit] = useState<Transaction | null>(null);
   const [overview, setOverview] = useState<UserOverview | null>(null);
+  const [contractData, setContractData] = useState<{ contracts: Contract[]; transactions: Transaction[] }>({ contracts: [], transactions: [] });
+  const [contractId, setContractId] = useState('');
+  const linkedContracts = contractData.contracts.filter((contract) => contract.creditUserIds.includes(creditUser?.credit_user_id ?? ''));
+  const selectedContract = linkedContracts.find((contract) => contract.id === contractId);
   const [screen, setScreen] = useState<Screen>('home');
   const [amount, setAmount] = useState(preview && !adminCredit ? '1000' : '');
   const [search, setSearch] = useState('');
@@ -52,12 +58,13 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
     ? head.parent_head_id === null || !visibleIds.has(head.parent_head_id)
     : head.parent_head_id === headId).sort((a, b) => a.head_name.localeCompare(b.head_name));
   const amountValid = amount.trim() !== '' && Number.isSafeInteger(Number(amount)) && Number(amount) > 0 && Number(amount) <= 999999999999;
-  const valid = amountValid && (adminCredit || !!selectedHead?.is_transactionable);
+  const validContract = !contractId || !!selectedContract?.isActive && Number(amount) <= contractBalance(selectedContract, contractData.transactions).remaining;
+  const valid = amountValid && validContract && (adminCredit || !!selectedHead?.is_transactionable);
   const dirty = !previewOnly && (amount !== '' || description !== '' || attachments.length > 0 || screen !== 'home');
   const locked = busy || attachmentBusy;
   const title = screen === 'heads'
     ? selectedHead?.head_name ?? (headId === undefined ? 'Choose a head' : 'Head unavailable')
-    : screen === 'images' ? 'Images' : screen === 'voice' ? 'Voice notes' : screen === 'description' ? 'Description' : 'Review transaction';
+    : screen === 'contracts' ? 'Choose a contract' : screen === 'images' ? 'Images' : screen === 'voice' ? 'Voice notes' : screen === 'description' ? 'Description' : 'Review transaction';
   const choices = children.filter((head) => `${head.head_name} ${head.head_description ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()))
     .map((head) => ({ id: head.head_id, name: head.head_name, image: head.image_url }));
 
@@ -68,7 +75,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
   useEffect(() => {
     let ignore = false;
     setRefreshing(true);
-    const request = creditUser ? cashbookApi.ledger().then(({ transactions }) => {
+    const request = creditUser ? cashbookApi.ledger().then(({ transactions, contracts = [] }) => {
+      if (!ignore) setContractData({ transactions, contracts });
       const report = ledgerReport(transactions, { dateFrom: '', dateTo: '', direction: 'both',
         userScope: creditUserScope(creditUser.credit_user_id) }, 'by-time', [], true);
       return { balance: report.closing, totalReceived: report.credit, totalBillPayment: report.debit,
@@ -85,17 +93,17 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
   function back() {
     if (locked) return;
     if (screen === 'heads' && path.length) { setPath((current) => current.slice(0, -1)); setSearch(''); setError(''); }
-    else go(screen === 'heads' ? 'home'
-      : screen === 'images' ? adminCredit ? 'home' : 'heads' : screen === 'voice' ? 'images' : screen === 'description' ? 'voice' : 'description');
+    else go(screen === 'heads' || screen === 'contracts' ? 'home'
+      : screen === 'images' ? adminCredit ? creditUser && linkedContracts.length ? 'contracts' : 'home' : 'heads' : screen === 'voice' ? 'images' : screen === 'description' ? 'voice' : 'description');
   }
   async function submit() {
     if (previewOnly || !valid || pending || !user.is_active || locked) return;
     setBusy(true); setError('');
     try {
       const input = { amount: Number(amount), description, headId: adminCredit ? null : headId!, attachments };
-      if (adminCredit) await cashbookApi.creditUser(user.user_id, input, creditUser?.credit_user_id);
+      if (adminCredit) await cashbookApi.creditUser(user.user_id, input, creditUser?.credit_user_id, contractId || undefined);
       else await cashbookApi.submitTransaction(user.user_id, input);
-      setScreen('home'); setAmount(''); setDescription(''); setPath([]); setAttachments([]); setSuccess(true);
+      setScreen('home'); setAmount(''); setDescription(''); setPath([]); setAttachments([]); setContractId(''); setSuccess(true);
       setReload((value) => value + 1);
       await onSubmitted?.();
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not submit. Your input has been kept.'); }
@@ -173,7 +181,7 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
         </article>
         <form className="flex-col gap-md" onSubmit={(event) => {
           event.preventDefault();
-          if (amountValid && user.is_active) { setSuccess(false); go(adminCredit ? 'images' : 'heads'); }
+          if (amountValid && user.is_active) { setSuccess(false); go(adminCredit ? creditUser && linkedContracts.length ? 'contracts' : 'images' : 'heads'); }
         }}>
           <label className="user-card-panel home-card--blue field amount-card">
             <span>Enter amount (PKR)</span>
@@ -182,6 +190,11 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
           </label>
           <button className="btn btn--primary user-next" disabled={!amountValid || !user.is_active}>Next</button>
         </form>
+      </>}
+      {screen === 'contracts' && creditUser && <>
+        <ReceiptContractPicker contracts={linkedContracts} transactions={contractData.transactions} payerId={creditUser.credit_user_id} amount={Number(amount)} selectedId={contractId}
+          onSelect={(id) => { setContractId(id); go('images'); }} />
+        <button className="btn user-next" onClick={() => { setContractId(''); go('images'); }}>Skip · Direct credit</button>
       </>}
       {(screen === 'heads') && <>
         {screen === 'heads' && selectedHead?.is_transactionable &&
@@ -225,11 +238,13 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
         <div className="user-card-panel flex-col gap-md">
           <dl className="review-details">
             {adminCredit && <><dt>{creditUser ? 'Received from' : 'Recipient'}</dt><dd>{creditUser?.user_name ?? user.user_name}</dd></>}
+            {creditUser && <><dt>Contract</dt><dd>{contractId ? selectedContract?.name ?? 'Contract unavailable' : 'Direct credit'}</dd></>}
             <dt>Amount</dt><dd>{money(Number(amount))}</dd>
             <dt>Description</dt><dd>{description || '—'}</dd>
             {!adminCredit && <><dt>Head</dt><dd>{selectedHead?.head_name ?? 'Head no longer available'}</dd></>}
           </dl>
           {!valid && <p role="alert">{adminCredit ? 'Go back and check the amount.' : 'Go back and check the amount and head.'}</p>}
+          {!validContract && <p role="alert">Go back and choose an active contract with enough remaining balance, or skip for a direct credit.</p>}
         </div>
         {(['image', 'voice'] as const).map((kind) => attachments.some((item) => item.kind === kind) &&
           <div className="user-card-panel flex-col gap-sm" key={kind}>

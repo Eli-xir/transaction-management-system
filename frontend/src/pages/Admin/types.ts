@@ -93,6 +93,7 @@ export interface Attachment { id: string; kind: 'image' | 'voice'; name: string;
 export interface ReferenceType { id: number; name: string; }
 export interface TransactionInput { amount: number; description?: string; headId: number | null; attachments: Attachment[]; transactionTypeId?: number; }
 export interface TransactionRevision extends TransactionInput {
+  contractId?: string | null; contractName?: string;
   versionId: string; recordedAt: string; editorId: string; action: string; active: boolean;
   headPath?: string;
 }

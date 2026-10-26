@@ -36,6 +36,7 @@ export function historyOf(entry: Transaction): TransactionRevision[] {
     action: 'Created', amount: entry.amount, headId: entry.headId, description: entry.description,
     transactionTypeId: entry.transactionTypeId, attachments: entry.attachments, active: entry.active,
     headPath: entry.headPath,
+    contractId: entry.contractId,
   }];
 }
 export type LedgerOrder = 'by-time' | 'credit-first' | 'debit-first' | 'by-head';

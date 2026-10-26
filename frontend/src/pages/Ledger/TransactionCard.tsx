@@ -4,16 +4,19 @@ import type { AdminUser, Contract, CreditUser, Head, Transaction, TransactionInp
 import { Dialog } from '../Admin/components/Dialog';
 import { AttachmentInput } from '../Admin/components/AttachmentInput';
 import { cashbookApi } from '../../data/cashbookApi';
+import { ReceiptContractPicker } from '../Admin/components/ReceiptContractPicker';
 import { direction, headPath, historyOf, money } from './ledgerModel';
 import './Ledger.css';
 
-export function TransactionCard({ entry, admin = false, company = false, heads = [], users = [], creditUsers = [], contracts = [], initialUserId = '', onClose, onChanged }: {
+export function TransactionCard({ entry, admin = false, company = false, heads = [], users = [], creditUsers = [], contracts = [], transactions = [], initialUserId = '', onClose, onChanged }: {
+  transactions?: Transaction[];
   contracts?: Contract[];
   entry?: Transaction; admin?: boolean; company?: boolean; heads?: Head[]; users?: AdminUser[]; creditUsers?: CreditUser[];
   initialUserId?: string; onClose: () => void; onChanged?: () => Promise<void>;
 }) {
   const [current, setCurrent] = useState(entry);
   const [editing, setEditing] = useState(!entry);
+  const [contractId, setContractId] = useState('');
   const [input, setInput] = useState<TransactionInput>(() => entry ? {
     amount: entry.amount, headId: entry.headId, description: entry.description ?? '', attachments: entry.attachments,
     transactionTypeId: entry.transactionTypeId ?? 1,
@@ -35,9 +38,9 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
     setBusy(true); setError('');
     try {
       const saved = current
-        ? await cashbookApi.editTransaction(current.id, input, historyOf(current).at(-1)!.versionId)
+        ? await cashbookApi.editTransaction(current.id, input, historyOf(current).at(-1)!.versionId, contractId || undefined)
         : await cashbookApi.creditUser(userId, input);
-      setCurrent(saved); setEditing(false);
+      setCurrent(saved); setEditing(false); setContractId('');
       await onChanged?.();
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not save.'); }
     finally { setBusy(false); }
@@ -66,6 +69,14 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
           {!heads.some((head) => head.head_id === input.headId && head.is_active && head.is_transactionable) && input.headId !== 0 && <option value={input.headId} disabled>Choose an active transactionable head</option>}
           {heads.filter((head) => head.is_active && head.is_transactionable).map((head) => <option key={head.head_id} value={head.head_id}>{headPath(heads, head.head_id)}</option>)}
         </select></label>}
+        {current?.creditUserId && !current.contractId && <div className="flex-col gap-sm">
+          <h3>Contract</h3>
+          <p>{contractId ? `Assign to: ${contracts.find((contract) => contract.id === contractId)?.name ?? 'Contract unavailable'}` : 'Direct credit'}</p>
+          {current.active ? <>
+            <ReceiptContractPicker contracts={contracts} transactions={transactions} payerId={current.creditUserId} amount={input.amount} selectedId={contractId} onSelect={setContractId} />
+            {contractId && <button type="button" className="btn" onClick={() => setContractId('')}>Keep as direct credit</button>}
+          </> : <p>Reactivate this receipt before assigning it to a contract.</p>}
+        </div>}
 <label className="field"><span>Description</span><textarea maxLength={4000} value={input.description ?? ''} onChange={(event) => setInput({ ...input, description: event.target.value })} /></label>
       </fieldset>
       {(['image', 'voice'] as const).map((kind) => <section key={kind} className="flex-col gap-sm">
@@ -95,7 +106,7 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
         <AttachmentInput exportable={admin} kind={kind} items={current.attachments.filter((item) => item.kind === kind)} />
       </section>)}
       {admin && <div className="flex-row flex-wrap gap-sm">
-        <button className="btn" disabled={locked} onClick={() => { setInput({ amount: current.amount, headId: current.headId, description: current.description ?? '', attachments: current.attachments, transactionTypeId: current.transactionTypeId ?? 1 }); setEditing(true); }}>Edit</button>
+        <button className="btn" disabled={locked} onClick={() => { setInput({ amount: current.amount, headId: current.headId, description: current.description ?? '', attachments: current.attachments, transactionTypeId: current.transactionTypeId ?? 1 }); setContractId(''); setEditing(true); }}>Edit</button>
         <button className="btn" disabled={locked} onClick={() => void action(current.active ? 'deactivate' : 'reactivate')}>{current.active ? 'Deactivate' : 'Reactivate'}</button>
         <button className="btn btn--danger" disabled={locked} onClick={() => setDeleting(true)}>Delete</button>
       </div>}
@@ -109,7 +120,7 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
       {[...historyOf(current)].reverse().map((version) => <details key={version.versionId} className="ledger-version">
         <summary>{version.action} · {money(version.amount)} · {new Date(version.recordedAt).toLocaleString()}</summary>
         <p className="hint">By {userName(version.editorId)} · {version.active ? 'Active' : 'Deactivated'}</p>
-        <p>{path(version.headId, version.headPath)} · {version.description}</p>
+        <p>{current.creditUserId ? `Contract: ${version.contractId ? version.contractName || contracts.find((contract) => contract.id === version.contractId)?.name || version.contractId : 'Direct credit'}` : path(version.headId, version.headPath)} · {version.description}</p>
         {(['image', 'voice'] as const).map((kind) => <AttachmentInput key={kind} kind={kind} items={version.attachments.filter((item) => item.kind === kind)} />)}
       </details>)}
     </section>}
