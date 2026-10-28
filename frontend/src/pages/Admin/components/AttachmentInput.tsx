@@ -88,9 +88,9 @@ export function AttachmentInput({ kind, items, onChange, onBusyChange, multiple 
     {onChange && <>
       <input ref={fileInput} type="file" hidden multiple={multiple}
         accept={kind === 'image' ? 'image/*' : 'audio/*'} disabled={busy}
-        onChange={(event) => { void add(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
+        onChange={async (event) => { const input = event.currentTarget; await add(Array.from(input.files ?? [])); input.value = ''; }} />
       {kind === 'image' && <input ref={cameraInput} type="file" hidden accept="image/*" capture="environment" disabled={busy}
-        onChange={(event) => { void add(Array.from(event.target.files ?? [])); event.target.value = ''; }} />}
+        onChange={async (event) => { const input = event.currentTarget; await add(Array.from(input.files ?? [])); input.value = ''; }} />}
       <div className={`attachment-dropzone flex-col items-center gap-md${dragOver ? ' attachment-dropzone--active' : ''}`}
         role="region" aria-label={kind === 'image' ? 'Add images' : 'Add voice notes'} aria-busy={busy}
         onDragOver={(event) => {

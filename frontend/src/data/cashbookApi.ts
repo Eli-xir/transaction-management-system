@@ -1,4 +1,5 @@
 import type { AppSession, Attachment, ReferenceType, CreateUserInput, CashbookData, StagedChange, Transaction, TransactionInput, UserAction, UserOverview, UserProfile, ContractInput } from '../pages/Admin/types';
+import { prepareAttachment } from './prepareAttachment';
 
 type State = CashbookData & { transactionTypes: ReferenceType[]; headRevision: number };
 let headRevision = 0;
@@ -9,14 +10,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(`${apiBase}${path}`, { ...options, credentials: 'same-origin',
       headers: { 'X-Cashbook': '1', ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options.headers } });
-  } catch { throw new Error('Could not reach the backend. Check your connection and that uvicorn is running.'); }
+  } catch (cause) {
+    throw new Error(path === '/attachments'
+      ? 'We couldn’t upload your file. Check your internet connection and try again.'
+      : 'We couldn’t connect. Check your internet connection and try again.', { cause });
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 401 && path !== '/session') window.dispatchEvent(new Event('cashbook:session-expired'));
     const detail = body?.detail;
     throw new Error(typeof detail === 'string' ? detail : Array.isArray(detail)
       ? detail.map((item: { msg: string }) => item.msg).join(' · ')
-      : 'The backend could not complete this request. Check that uvicorn is running.');
+      : 'Something went wrong. Please try again in a moment.');
   }
   return body as T;
 }
@@ -55,8 +60,8 @@ export const cashbookApi = {
   editTransaction: (id: string, input: TransactionInput, expectedVersion: string, contractId?: string) => change<Transaction>({ op: 'transaction', action: 'edit', id: Number(id), input, expectedVersion: Number(expectedVersion), contractId }),
   transactionAction: (id: string, action: 'deactivate' | 'reactivate' | 'delete', expectedVersion: string) => change<Transaction | null>({ op: 'transaction', action, id: Number(id), expectedVersion: Number(expectedVersion) }),
   async uploadAttachment(file: File, kind: Attachment['kind'], maxBytes = 5 * 1024 * 1024) {
-    if (!file.size || file.size > maxBytes) throw new Error('Choose a file up to 5 MB.');
-    const form = new FormData(); form.append('file', file); form.append('kind', kind);
+    const prepared = await prepareAttachment(file, maxBytes);
+    const form = new FormData(); form.append('file', prepared); form.append('kind', kind);
     return request<Attachment>('/attachments', { method: 'POST', body: form });
   },
 };
