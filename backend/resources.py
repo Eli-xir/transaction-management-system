@@ -22,9 +22,20 @@ from resource_models import (
 from queries import external_users, one, permission_rules, users
 from responses import (UserResource, ExternalUserResource, ContractResource, TransactionResource,
                        TransactionPage, SubmissionResource)
+from receipts import EditReceipt, ReturnReceipt, edit as edit_receipt, refund as refund_receipt
 from service import admin, change_credit_user, heads, ledger, overview, require, state, record_user_bill
 
 router = APIRouter(prefix='/api')
+
+
+@router.put('/receipts/{receipt_id}/allocations', response_model=TransactionResource, tags=['External receipts'])
+def receipt_allocations(receipt_id: RecordId, value: EditReceipt, db: DB, actor: Writer):
+    return edit_receipt(db, actor, receipt_id, value)
+
+
+@router.post('/receipts/{receipt_id}/returns', status_code=201, response_model=TransactionResource, tags=['External receipts'])
+def receipt_return(receipt_id: RecordId, value: ReturnReceipt, db: DB, actor: Writer):
+    return refund_receipt(db, actor, receipt_id, value)
 
 
 def own_account(actor, user_id):

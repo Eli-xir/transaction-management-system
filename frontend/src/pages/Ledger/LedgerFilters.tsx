@@ -37,7 +37,8 @@ export function LedgerFilters({ column, filters, heads, users, contracts = [], c
         <input type="search" aria-label="Search contracts" placeholder="Search contracts" value={search} onChange={(event) => setSearch(event.target.value)} />
         <div className="filter-choices">
           <button className="btn" aria-pressed={!filters.contractId} onClick={() => update({ contractId: undefined })}>All contracts</button>
-          <button className="btn" aria-pressed={filters.contractId === '__none__'} onClick={() => update({ contractId: '__none__' })}>No contract</button>
+          <button className="btn" aria-pressed={filters.contractId === '__none__'} onClick={() => update({ contractId: '__none__' })}>Unallocated</button>
+          <button className="btn" aria-pressed={filters.contractId === '__profit__'} onClick={() => update({ contractId: '__profit__' })}>Company profit</button>
           {contracts.filter((item) => `${item.name} ${item.description}`.toLowerCase().includes(search.toLowerCase())).map((item) =>
             <button className="btn" key={item.id} aria-pressed={filters.contractId === item.id} onClick={() => update({ contractId: item.id })}>{item.name}{!item.isActive && ' · Archived'}</button>)}
         </div>

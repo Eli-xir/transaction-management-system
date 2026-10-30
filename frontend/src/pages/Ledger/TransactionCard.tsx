@@ -1,6 +1,6 @@
 import { AttachmentExport } from './AttachmentExport';
 import { useState } from 'react';
-import type { AdminUser, Contract, CreditUser, Head, Transaction, TransactionInput } from '../Admin/types';
+import type { AdminUser, Contract, CreditUser, Head, ReceiptAllocation, Transaction, TransactionInput } from '../Admin/types';
 import { Dialog } from '../Admin/components/Dialog';
 import { AttachmentInput } from '../Admin/components/AttachmentInput';
 import { cashbookApi } from '../../data/cashbookApi';
@@ -8,6 +8,8 @@ import { ReceiptContractPicker } from '../Admin/components/ReceiptContractPicker
 import { direction, headPath, historyOf, money } from './ledgerModel';
 import './Ledger.css';
 import { adminPayableLabel } from '../Admin/utils/adminPayable';
+import { ReceiptAllocationEditor, ReceiptDetails } from './ReceiptAllocations';
+import { receiptAllocations } from './receiptModel';
 
 export function TransactionCard({ entry, admin = false, company = false, heads = [], users = [], creditUsers = [], contracts = [], transactions = [], initialUserId = '', onClose, onChanged }: {
   transactions?: Transaction[];
@@ -18,6 +20,7 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
   const [current, setCurrent] = useState(entry);
   const [editing, setEditing] = useState(!entry);
   const [contractId, setContractId] = useState('');
+  const [allocations, setAllocations] = useState<ReceiptAllocation[]>(() => entry ? receiptAllocations(entry) : []);
   const [input, setInput] = useState<TransactionInput>(() => entry ? {
     amount: entry.amount, headId: entry.headId, description: entry.description ?? '', attachments: entry.attachments,
     transactionTypeId: entry.transactionTypeId ?? 1,
@@ -39,7 +42,9 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
     setBusy(true); setError('');
     try {
       const saved = current
-        ? await cashbookApi.editTransaction(current.id, input, historyOf(current).at(-1)!.versionId, contractId || undefined)
+        ? current.receiptKey && !current.receiptParentId
+          ? await cashbookApi.editReceipt(current.id, input, historyOf(current).at(-1)!.versionId, allocations)
+          : await cashbookApi.editTransaction(current.id, input, historyOf(current).at(-1)!.versionId, contractId || undefined)
         : await cashbookApi.creditUser(userId, input);
       setCurrent(saved); setEditing(false); setContractId('');
       await onChanged?.();
@@ -59,6 +64,8 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
   return <Dialog title={current ? `${direction(current, company) === 'credit' ? 'Credit' : 'Debit'} · ${money(current.amount)}` : 'Credit a user'} onClose={onClose} busy={locked}>
     {current && adminPayableLabel(current) && <p role="status">{adminPayableLabel(current)}</p>}
     {current?.contractId && <p>Contract: <strong>{contracts.find((contract) => contract.id === current.contractId)?.name ?? current.contractId}</strong></p>}
+    {current?.receiptKey && !editing && <ReceiptDetails key={historyOf(current).at(-1)!.versionId} entry={current} contracts={contracts} transactions={transactions} busy={locked} onBusyChange={setBusy}
+      onReturn={async () => { const saved = await cashbookApi.readTransaction(current.id); setCurrent(saved); await onChanged?.(); }} />}
     {editing && admin ? <form className="flex-col gap-md" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <fieldset className="field flex-col gap-md" disabled={locked}>
         {!current && <label className="field"><span>User</span><select required value={userId} onChange={(event) => setUserId(event.target.value)}>
@@ -71,7 +78,8 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
           {!heads.some((head) => head.head_id === input.headId && head.is_active && head.is_transactionable) && input.headId !== 0 && <option value={input.headId} disabled>Choose an active transactionable head</option>}
           {heads.filter((head) => head.is_active && head.is_transactionable).map((head) => <option key={head.head_id} value={head.head_id}>{headPath(heads, head.head_id)}</option>)}
         </select></label>}
-        {current?.creditUserId && !current.contractId && <div className="flex-col gap-sm">
+        {current?.receiptKey && !current.receiptParentId && <ReceiptAllocationEditor entry={current} amount={input.amount} contracts={contracts} values={allocations} onChange={setAllocations} />}
+        {current?.creditUserId && !current.receiptKey && !current.contractId && <div className="flex-col gap-sm">
           <h3>Contract</h3>
           <p>{contractId ? `Assign to: ${contracts.find((contract) => contract.id === contractId)?.name ?? 'Contract unavailable'}` : 'Direct credit'}</p>
           {current.active ? <>
@@ -100,7 +108,7 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
         {admin && <><dt>User</dt><dd>{entryUserName(current)}</dd><dt>Entered by</dt><dd>{userName(current.createdBy)}</dd></>}
         {current.headId !== null && <><dt>Head</dt><dd>{path(current.headId, current.headPath)}</dd></>}
         <dt>Description</dt><dd>{current.description || '—'}</dd>
-        <dt>Type</dt><dd>General</dd>
+        <dt>Type</dt><dd>{current.receiptParentId ? 'Receipt return' : 'General'}</dd>
         {admin && <><dt>Status</dt><dd>{current.active ? 'Active' : 'Deactivated'}</dd></>}
       </dl>
       {(['image', 'voice'] as const).map((kind) => <section key={kind} className="flex-col gap-sm">
@@ -108,9 +116,9 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
         <AttachmentInput exportable={admin} kind={kind} items={current.attachments.filter((item) => item.kind === kind)} />
       </section>)}
       {admin && <div className="flex-row flex-wrap gap-sm">
-        <button className="btn" disabled={locked} onClick={() => { setInput({ amount: current.amount, headId: current.headId, description: current.description ?? '', attachments: current.attachments, transactionTypeId: current.transactionTypeId ?? 1 }); setContractId(''); setEditing(true); }}>Edit</button>
+        {!current.receiptParentId && <button className="btn" disabled={locked} onClick={() => { setInput({ amount: current.amount, headId: current.headId, description: current.description ?? '', attachments: current.attachments, transactionTypeId: current.transactionTypeId ?? 1 }); setContractId(''); setAllocations(receiptAllocations(current)); setEditing(true); }}>Edit</button>}
         <button className="btn" disabled={locked} onClick={() => void action(current.active ? 'deactivate' : 'reactivate')}>{current.active ? 'Deactivate' : 'Reactivate'}</button>
-        <button className="btn btn--danger" disabled={locked} onClick={() => setDeleting(true)}>Delete</button>
+        {!current.receiptParentId && <button className="btn btn--danger" disabled={locked} onClick={() => setDeleting(true)}>Delete</button>}
       </div>}
     </>}
     {error && <p role="alert" className="text-error">{error}</p>}
@@ -123,6 +131,7 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
         <summary>{version.action} · {money(version.amount)} · {new Date(version.recordedAt).toLocaleString()}</summary>
         <p className="hint">By {userName(version.editorId)} · {version.active ? 'Active' : 'Deactivated'}</p>
         <p>{current.creditUserId ? `Contract: ${version.contractId ? version.contractName || contracts.find((contract) => contract.id === version.contractId)?.name || version.contractId : 'Direct credit'}` : path(version.headId, version.headPath)} · {version.description}</p>
+        {!!version.allocations?.length && <ul>{version.allocations.map((a, i) => <li key={i}>{a.kind === 'profit' ? 'Company profit' : a.contractName} · {money(a.amount)}</li>)}</ul>}
         {(['image', 'voice'] as const).map((kind) => <AttachmentInput key={kind} kind={kind} items={version.attachments.filter((item) => item.kind === kind)} />)}
       </details>)}
     </section>}

@@ -28,3 +28,6 @@
 .report-preview > div { height: 100%; min-height: 0; }
 .report-preview iframe { flex: 1; min-height: 0; width: 100%; border: 0; background: white; }
 .report-preview .btn { min-height: 44px; }
+.receipt-details-button { display: block; margin-top: .5rem; font-size: .85rem; }
+.receipt-detail-item { display: contents; }
+.receipt-allocation-row > .field { flex: 1 1 12rem; min-width: 0; }

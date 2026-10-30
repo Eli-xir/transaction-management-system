@@ -58,7 +58,7 @@ export function AdminPage(props: AdminPageProps) {
   const { users, heads, permissions, currentAdminUserId } = props;
   const [page, setPage] = useState<Page>('home');
   const [contractId, setContractId] = useState('');
-  const [contractFrom, setContractFrom] = useState<'contracts' | 'receivable'>('contracts');
+  const [contractFrom, setContractFrom] = useState<'contracts' | 'receivable' | 'payable'>('contracts');
   const [payUserId, setPayUserId] = useState('');
   const contracts = props.contracts ?? [];
   const selectedContract = contracts.find((contract) => contract.id === contractId);
@@ -97,13 +97,15 @@ export function AdminPage(props: AdminPageProps) {
   const totals = ledgerReport(props.transactions, { dateFrom: '', dateTo: '', userScope: 'all', direction: 'both' }, 'by-time', [], true);
   const outstanding = outstandingBalances(selectableUsers, props.transactions);
   const contractOutstanding = contracts.map((contract) => contractBalance(contract, props.transactions).remaining).filter((amount) => amount > 0);
+  const contractPayable = contracts.map((contract) => -contractBalance(contract, props.transactions).remaining).filter((amount) => amount > 0);
   const homeCards = cards.map((card) => {
     if (card.id === 'admin-payable') return { ...card, amount: money(selectableUsers.reduce((sum, user) => sum + adminPayableBalance(props.transactions, user.user_id), 0)) };
     if (card.id === 'contracts') return { ...card, amount: money(contractOutstanding.reduce((sum, amount) => roundMoney(sum + amount), 0)), detail: `${contractOutstanding.length} outstanding contracts` };
     if (card.id !== 'receivable' && card.id !== 'payable') return card;
     const accounts = outstanding.filter((entry) => entry.category === card.id);
-    const extra = card.id === 'receivable' ? contractOutstanding.reduce((sum, amount) => roundMoney(sum + amount), 0) : 0;
-    return { ...card, amount: money(roundMoney(balanceTotal(accounts) + extra)), detail: `${accounts.length} ${accounts.length === 1 ? 'user' : 'users'}${card.id === 'receivable' ? ` · ${contractOutstanding.length} contracts` : ''}` };
+    const contractAmounts = card.id === 'receivable' ? contractOutstanding : contractPayable;
+    const extra = contractAmounts.reduce((sum, amount) => roundMoney(sum + amount), 0);
+    return { ...card, amount: money(roundMoney(balanceTotal(accounts) + extra)), detail: `${accounts.length} ${accounts.length === 1 ? 'user' : 'users'} · ${contractAmounts.length} contracts` };
   });
   const diff = permissionDiff(permissions[selectedUserId] ?? [], editor.ids(selectedUserId));
   function navigate(action: () => void) {
@@ -115,7 +117,7 @@ export function AdminPage(props: AdminPageProps) {
   function openAttachments(scope: string) {
     navigate(() => { setAttachmentScope(scope); setPage('attachments'); });
   }
-  function openContract(id: string, from: 'contracts' | 'receivable') {
+  function openContract(id: string, from: 'contracts' | 'receivable' | 'payable') {
     navigate(() => { setContractId(id); setContractFrom(from); setPage('contract'); });
   }
   function closeHeadView() {
@@ -170,7 +172,7 @@ export function AdminPage(props: AdminPageProps) {
       {page === 'admin-payable' && <AdminPayablePage users={users} heads={heads} transactions={props.transactions}
         onBack={() => navigate(() => setPage('home'))} onStatement={(id) => navigate(() => { setStatementFrom('admin-payable'); setFilters({ dateFrom: '', dateTo: '', userScope: id, direction: 'both', showAdminPayable: true }); setPage('statement'); })} onRefresh={props.onRefresh} onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} />}
       {(['receivable', 'payable'] as const).map((category) => <div key={category} hidden={page !== category || (category === 'payable' && !!payUserId)}>
-        <OutstandingPage category={category} entries={outstanding} contracts={contracts} transactions={props.transactions} onContract={(id) => openContract(id, 'receivable')} onBack={() => navigate(() => setPage('home'))} onPay={setPayUserId}
+        <OutstandingPage category={category} entries={outstanding} contracts={contracts} transactions={props.transactions} onContract={(id) => openContract(id, category)} onBack={() => navigate(() => setPage('home'))} onPay={setPayUserId}
           onStatement={(userScope) => navigate(() => {
             setStatementFrom(category);
             setFilters({ dateFrom: '', dateTo: '', userScope, direction: 'both' });
@@ -178,8 +180,8 @@ export function AdminPage(props: AdminPageProps) {
           })} />
       </div>)}
       <div hidden={page !== 'contracts'}><ContractList contracts={contracts} transactions={props.transactions} onOpen={(id) => openContract(id, 'contracts')} onBack={() => navigate(() => setPage('home'))} /></div>
-      {page === 'contract' && (selectedContract ? <ContractDetails key={contractId} contract={selectedContract} transactions={props.transactions} creditUsers={props.creditUsers} users={users} heads={heads} adminId={currentAdminUserId} backLabel={`Back to ${contractFrom === 'contracts' ? 'Contracts' : 'Receivable'}`}
-        onBack={() => navigate(() => setPage(contractFrom))} onDeleted={() => setPage(contractFrom)} onRefresh={props.onRefresh} onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} /> : <div><p>This contract is no longer available.</p><button className="btn" onClick={() => navigate(() => setPage(contractFrom))}>← Back to {contractFrom === 'contracts' ? 'Contracts' : 'Receivable'}</button></div>)}
+      {page === 'contract' && (selectedContract ? <ContractDetails key={contractId} contract={selectedContract} transactions={props.transactions} creditUsers={props.creditUsers} users={users} heads={heads} adminId={currentAdminUserId} backLabel={`Back to ${contractFrom === 'contracts' ? 'Contracts' : contractFrom === 'payable' ? 'Payable' : 'Receivable'}`}
+        onBack={() => navigate(() => setPage(contractFrom))} onDeleted={() => setPage(contractFrom)} onRefresh={props.onRefresh} onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} /> : <div><p>This contract is no longer available.</p><button className="btn" onClick={() => navigate(() => setPage(contractFrom))}>← Back to {contractFrom === 'contracts' ? 'Contracts' : contractFrom === 'payable' ? 'Payable' : 'Receivable'}</button></div>)}
       {page === 'payable' && payUserId && <AdminDebitFlow key={payUserId} initialUserId={payUserId} returnToSource users={users} heads={heads}
         onClose={() => setPayUserId('')} onSubmitted={props.onRefresh} onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} />}
       <section className={`admin-controls flex-col gap-md${page === 'heads' ? ' admin-controls--heads' : ''}`} hidden={page !== 'users' && page !== 'heads'}>

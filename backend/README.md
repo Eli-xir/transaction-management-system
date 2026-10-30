@@ -193,6 +193,37 @@ commit; commits (including deferred constraints) finish before a success respons
 Dependency cleanup also runs before sending responses. No schema, money formula,
 ORM, queue, cache, or database migration was introduced by this refactor.
 
+## External receipt allocations
+
+Receipt creation stays on `POST /api/transactions/credits`. Only external-user
+receipts receive a permanent eight-character alphanumeric `receiptKey`.
+`PUT /api/receipts/{id}/allocations` saves the receipt's `input`,
+`expectedVersion` and complete `allocations` list atomically. Each allocation is
+`{kind: "contract", contractId, amount}` or `{kind: "profit", amount}`. Contract
+allocations must use a linked payer; overpayment is allowed. Contract balances
+use allocated amounts, with negative remaining balances classified as Payable.
+
+`POST /api/receipts/{id}/returns` accepts `expectedVersion`, `amount`, and an
+optional `description`. It creates one compensating cash debit, linked to the
+original receipt, limited to its unallocated amount. Original receipts and their
+returns share the same public key. Returns cannot be edited or deleted; an
+incorrect return can be deactivated, with history retained. Normal-user and
+Admin payable entry routes are unaffected.
+
+Migration012 introduces only `receipt_allocations`. Its `kind` distinguishes
+receipt identity, return links, and versioned contract/profit allocation rows.
+Existing table definitions are unchanged; the table can reference any transaction
+for future extensions, while the application enables this workflow only for
+external users. Backfill preserves legacy receipt and version values. The
+existing schema-version tracker records migration12 as usual.
+
+Receipt totals stay in the original transaction, and attachments stay on its
+versions. Do not sum allocations into company cash or assume every external-user
+transaction is a credit: `receiptParentId` identifies a debit return. Contract
+statements project only the contract's allocated portion; editing one opens the
+original full receipt. Receipt keys/search controls are omitted from print/PDF
+and spreadsheet report documents.
+
 ## Verification
 
 Install test dependencies with `python -m pip install -r requirements-dev.txt`.

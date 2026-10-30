@@ -80,8 +80,18 @@ def ledger(db, user_id=None, credits_only=False, *, limit=None, offset=0, transa
     if limit is not None:
         paging = ' LIMIT %s OFFSET %s'
         params.extend((limit, offset))
-    entries = db.execute(f'SELECT t.* FROM transactions t {where} ORDER BY t.created_at,t.transaction_id{paging}', params).fetchall()
+    entries = db.execute(f'''SELECT t.*, r.receipt_key, r.parent_receipt_id AS receipt_parent_id,
+        parent.receipt_key AS parent_receipt_key FROM transactions t
+        LEFT JOIN receipt_allocations r ON r.transaction_id=t.transaction_id AND r.kind IN ('receipt','return')
+        LEFT JOIN receipt_allocations parent ON parent.transaction_id=r.parent_receipt_id AND parent.kind='receipt'
+        {where} ORDER BY t.created_at,t.transaction_id{paging}''', params).fetchall()
     ids = [row['transaction_id'] for row in entries]
+    refund_totals = {row['parent_receipt_id']: row['amount'] for row in db.execute('''
+        SELECT r.parent_receipt_id,sum(v.transaction_amount) AS amount
+        FROM receipt_allocations r JOIN transactions t ON t.transaction_id=r.transaction_id
+        JOIN transaction_versions v ON v.version_id=t.current_version_id
+        WHERE r.kind='return' AND t.is_active AND r.parent_receipt_id=ANY(%s)
+        GROUP BY r.parent_receipt_id''', (ids,)).fetchall()}
     versions = db.execute('SELECT * FROM transaction_versions WHERE transaction_id=ANY(%s) ORDER BY version_id', (ids,)).fetchall()
     if credits_only:
         current = {row['current_version_id'] for row in entries}
@@ -93,6 +103,14 @@ def ledger(db, user_id=None, credits_only=False, *, limit=None, offset=0, transa
     for row in media:
         by_version.setdefault(row['version_id'], []).append(attachment(row))
     by_entry = {}
+    allocation_rows = db.execute('SELECT * FROM receipt_allocations WHERE version_id=ANY(%s) ORDER BY position',
+                                 ([v['version_id'] for v in versions],)).fetchall()
+    by_allocation = {}
+    allocated_amounts = {}
+    for a in allocation_rows:
+        allocated_amounts[a['version_id']] = allocated_amounts.get(a['version_id'], 0) + a['amount']
+        by_allocation.setdefault(a['version_id'], []).append(dict(kind=a['kind'], contractId=str(a['contract_id']) if a['contract_id'] else None,
+                                                                  contractName=a['contract_name'], amount=float(a['amount'])))
     for v in versions:
         by_entry.setdefault(v['transaction_id'], []).append({
             'versionId': str(v['version_id']), 'recordedAt': v['created_at'].isoformat(),
@@ -101,8 +119,10 @@ def ledger(db, user_id=None, credits_only=False, *, limit=None, offset=0, transa
             'active': v['is_active'], 'headPath': v['head_path'],
             'contractId': str(v['contract_id']) if v.get('contract_id') else None,
             'contractName': v.get('contract_name', ''),
+            'allocations': by_allocation.get(v['version_id'], []),
             'attachments': by_version.get(v['version_id'], [])})
     result = []
+    version_amounts = {v['version_id']: v['transaction_amount'] for v in versions}
     for row in entries:
         history = by_entry[row['transaction_id']]
         current = next(v for v in history if v['versionId'] == str(row['current_version_id']))
@@ -111,6 +131,14 @@ def ledger(db, user_id=None, credits_only=False, *, limit=None, offset=0, transa
                           createdAt=row['created_at'].isoformat(), headId=row['head_id'], headPath=path(db, row['head_id']),
                           active=row['is_active'], creditUserId=str(row['credit_user_id']) if row['credit_user_id'] else None,
                           contractId=str(row['contract_id']) if row.get('contract_id') else None)
+        if row.get('credit_user_id'):
+            parent_id = row.get('receipt_parent_id')
+            key = row.get('receipt_key')
+            if parent_id:
+                key = row['parent_receipt_key']
+            refunded = refund_totals.get(row['transaction_id'], 0) if not parent_id else 0
+            result[-1].update(receiptKey=key, receiptParentId=str(parent_id) if parent_id else None,
+                              returnedAmount=float(refunded), unallocatedAmount=float(version_amounts[row['current_version_id']]-allocated_amounts.get(row['current_version_id'], 0)-refunded) if not parent_id else 0)
         if not credits_only:
             result[-1]['versions'] = history
     return result
@@ -120,9 +148,10 @@ def overview(db, user_id):
     user = account(db, user_id)
     if user['user_role_id'] == 1:
         amounts = db.execute('''SELECT
-            COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id=t.user_id),0) AS credits,
-            COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id<>t.user_id),0) AS debits
+            COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id=t.user_id AND r.record_id IS NULL),0) AS credits,
+            COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id<>t.user_id OR r.record_id IS NOT NULL),0) AS debits
             FROM transactions t JOIN transaction_versions v ON v.version_id=t.current_version_id
+            LEFT JOIN receipt_allocations r ON r.transaction_id=t.transaction_id AND r.kind='return'
             WHERE t.is_active AND v.transaction_type_id<>2''').fetchone()
         credits, debits = float(amounts['credits']), float(amounts['debits'])
         return {'balance': credits-debits, 'totalReceived': credits, 'totalBillPayment': debits,
@@ -278,7 +307,7 @@ def validate_input(db, actor, value, user_id, submission=False, direct=False, al
     return ids
 
 
-def revise(db, entry, editor_id, action, value=None, attachment_ids=None):
+def revise(db, entry, editor_id, action, value=None, attachment_ids=None, *, allocation_values=None):
     old = db.execute('SELECT * FROM transaction_versions WHERE version_id=%s', (entry['current_version_id'],)).fetchone()
     head_id = value.headId if value else entry['head_id']
     category_id = None if value else entry['category_group_id']
@@ -290,6 +319,13 @@ def revise(db, entry, editor_id, action, value=None, attachment_ids=None):
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING version_id''',
         (entry['transaction_id'], value.amount if value else old['transaction_amount'], value.transactionTypeId if value else old['transaction_type_id'],
          editor_id, action, head_id, category_id, entry['is_active'], path(db, head_id), category_name, value.description if value else old['description'], contract_id, contract_name)).fetchone()['version_id']
+    if entry.get('credit_user_id'):
+        from receipts import copy_allocations, metadata, register
+        if not entry['current_version_id'] and not entry.get('receipt_parent_id'):
+            register(db, entry)
+        elif entry['current_version_id']:
+            metadata(db, entry)
+        copy_allocations(db, entry, version_id, value.amount if value else old['transaction_amount'], allocation_values)
     if attachment_ids is None:
         attachment_ids = [r['attachment_id'] for r in db.execute('SELECT attachment_id FROM transaction_version_attachments WHERE version_id=%s', (entry['current_version_id'],)).fetchall()]
     for aid in attachment_ids:
@@ -352,6 +388,10 @@ def transaction_change(db, actor, change):
         if current_type in (2, 3):
             from personal_payable import change as change_personal
             return change_personal(db, actor, entry, change)
+        if entry.get('credit_user_id'):
+            from receipts import guard_change, metadata
+            metadata(db, entry)
+            guard_change(db, entry, change)
         assigning_contract = change.action == 'edit' and change.contractId is not None and not entry.get('contract_id')
         if change.action == 'edit' and change.contractId is not None:
             require(entry.get('credit_user_id'), 'Contracts only apply to receipts from external users.')
@@ -373,7 +413,14 @@ def transaction_change(db, actor, change):
         if change.action == 'edit':
             creator = account(db, entry['created_by_user_id'])
             ids = validate_input(db, actor, change.input, entry['user_id'], direct=creator['user_role_id'] == 1)
-            revise(db, entry, actor['user_id'], 'Assigned to contract' if assigning_contract else 'Edited', change.input, ids)
+            allocation_values = None
+            if assigning_contract:
+                from receipts import allocations, returned
+                require(not allocations(db, entry['current_version_id']) and not returned(db, entry['transaction_id']),
+                        'Use the receipt allocation editor to change an allocated receipt.')
+                name = db.execute('SELECT name FROM contracts WHERE contract_id=%s', (entry['contract_id'],)).fetchone()['name']
+                allocation_values = [dict(kind='contract', contract_id=entry['contract_id'], contract_name=name, amount=change.input.amount)]
+            revise(db, entry, actor['user_id'], 'Assigned to contract' if assigning_contract else 'Edited', change.input, ids, allocation_values=allocation_values)
         else:
             entry['is_active'] = change.action == 'reactivate'
             revise(db, entry, actor['user_id'], 'Reactivated' if entry['is_active'] else 'Deactivated')

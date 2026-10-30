@@ -130,8 +130,9 @@ class DatabaseApiTests(unittest.TestCase):
         receipt_body = {'userId': admin_id, 'creditUserId': external_id, 'contractId': contract_id,
                         'input': {'amount': '400', 'description': 'First receipt'}}
         receipt = self.call(self.admin, 'POST', '/api/transactions/credits', receipt_body, 201)
-        self.call(self.admin, 'POST', '/api/transactions/credits',
-                  {**receipt_body, 'input': {'amount': '700'}}, 400)
+        overpaid = self.call(self.admin, 'POST', '/api/transactions/credits',
+                  {**receipt_body, 'input': {'amount': '700'}}, 201)
+        self.call(self.admin, 'DELETE', f"/api/transactions/{overpaid['id']}?expectedVersion={overpaid['versions'][-1]['versionId']}", expected=204)
         self.call(self.user, 'POST', '/api/transactions/credits', receipt_body, 403)
         direct = self.call(self.admin, 'POST', '/api/transactions/credits',
                            {'userId': admin_id, 'creditUserId': external_id, 'input': {'amount': '200'}}, 201)
@@ -145,7 +146,7 @@ class DatabaseApiTests(unittest.TestCase):
         self.call(self.admin, 'PUT', f"/api/transactions/{direct['id']}",
                   {'expectedVersion': old_version, 'input': {'amount': '100'}}, 409)
         self.call(self.admin, 'PUT', f'/api/contracts/{contract_id}?expectedRevision=1',
-                  {**contract_input, 'totalAmount': '500'}, 400)
+                  {**contract_input, 'totalAmount': '0'}, 422)
         renamed = self.call(self.admin, 'PUT', f'/api/contracts/{contract_id}?expectedRevision=1',
                             {**contract_input, 'name': 'Renamed contract'})
         self.assertEqual(renamed['revision'], 2)
@@ -153,17 +154,16 @@ class DatabaseApiTests(unittest.TestCase):
         preserved = self.call(self.admin, 'GET', f"/api/transactions/{direct['id']}")
         self.assertEqual(preserved['versions'][-1]['contractName'], contract_input['name'])
 
-        # Two simultaneous receipts compete for one shared remaining amount:
-        # exactly one can consume300 of the400 left.
+        # Overpayment is now allowed; both receipts remain independent cash rows.
         def concurrent_credit(_):
             return self.admin.post('/api/transactions/credits', headers={'X-Cashbook': '1'},
                                    json={**receipt_body, 'input': {'amount': '300'}}).status_code
         with ThreadPoolExecutor(max_workers=2) as executor:
-            self.assertEqual(sorted(executor.map(concurrent_credit, range(2))), [201, 400])
+            self.assertEqual(sorted(executor.map(concurrent_credit, range(2))), [201, 201])
 
         legacy = self.call(self.admin, 'GET', '/api/state')
-        self.assertEqual(len(legacy['transactions']), 5)
-        self.assertEqual(sum(t['amount'] for t in legacy['transactions'] if t['contractId'] == contract_id), 900)
+        self.assertEqual(len(legacy['transactions']), 6)
+        self.assertEqual(sum(t['amount'] for t in legacy['transactions'] if t['contractId'] == contract_id), 1200)
         self.assertEqual(self.call(self.admin, 'GET', '/api/transactions?limit=2')['nextOffset'], 2)
         changed = self.call(self.admin, 'POST', '/api/changes', {'op': 'creditUser', 'action': 'pin',
                             'creditUserId': external_id, 'pinned': True})
@@ -237,6 +237,7 @@ class DatabaseApiTests(unittest.TestCase):
         self.call(self.admin, 'POST', personal_url+'/payments', {'input': {'amount': '100'}}, 201)
         self.call(self.admin, 'POST', personal_url+'/payments', {'input': {'amount': '1'}}, 400)
 
+        self.check_receipt_allocations(admin_id, external_id, worker_id)
         self.call(self.admin, 'PUT', f'/api/users/{worker_id}/password', {'password': 'replacement-password'}, 204)
         self.call(self.user, 'GET', '/api/state', expected=401)
         self.assertIsNone(self.call(self.user, 'GET', '/api/session'))
@@ -248,6 +249,101 @@ class DatabaseApiTests(unittest.TestCase):
         self.call(self.admin, 'DELETE', '/api/session')
         self.assertIsNone(self.call(self.admin, 'GET', '/api/session'))
         self.call(self.admin, 'GET', '/api/users', expected=401)
+
+    def check_receipt_allocations(self, admin_id, payer_id, worker_id):
+        """Cash, attribution, immutable links, concurrency and authorization together."""
+        c1 = self.call(self.admin, 'POST', '/api/contracts', {'name': 'Split project one', 'totalAmount': '200', 'creditUserIds': [payer_id]}, 201)
+        c2 = self.call(self.admin, 'POST', '/api/contracts', {'name': 'Split project two', 'totalAmount': '500', 'creditUserIds': [payer_id]}, 201)
+        other_payer = self.call(self.admin, 'POST', '/api/external-users', {'user_name': 'Other receipt payer'}, 201)['credit_user_id']
+        unlinked = self.call(self.admin, 'POST', '/api/contracts', {'name': 'Unlinked project', 'totalAmount': '100', 'creditUserIds': [other_payer]}, 201)
+        upload = self.admin.post('/api/attachments', headers={'X-Cashbook': '1'}, data={'kind': 'image'},
+            files={'file': ('shared-receipt.jpg', b'\xff\xd8\xff\xe0receipt', 'image/jpeg')})
+        self.assertEqual(upload.status_code, 200, upload.text)
+        before = self.call(self.admin, 'GET', f'/api/users/{admin_id}/overview')['balance']
+        receipt_input = {'amount': '1000', 'description': 'One receipt shared across projects', 'attachments': [upload.json()]}
+        root = self.call(self.admin, 'POST', '/api/transactions/credits', {'userId': admin_id, 'creditUserId': payer_id, 'input': receipt_input}, 201)
+        key, rid = root['receiptKey'], root['id']
+        self.assertRegex(key, r'^[A-Z0-9]{8}$')
+        self.assertEqual(root['unallocatedAmount'], 1000)
+        def version(entry):
+            return int(entry['versions'][-1]['versionId'])
+        values = [{'kind': 'contract', 'contractId': c1['id'], 'amount': '300'},
+                  {'kind': 'contract', 'contractId': c2['id'], 'amount': '200'}, {'kind': 'profit', 'amount': '250'}]
+        body = {'expectedVersion': version(root), 'input': receipt_input, 'allocations': values}
+        url = f'/api/receipts/{rid}/allocations'
+        self.call(self.user, 'PUT', url, body, 403)
+        self.call(self.admin, 'PUT', f'/api/receipts/2147483647/allocations', body, 404)
+        normal = self.call(self.admin, 'POST', '/api/transactions/credits', {'userId': worker_id, 'input': {'amount': '10'}}, 201)
+        self.call(self.admin, 'PUT', f"/api/receipts/{normal['id']}/allocations", {**body, 'expectedVersion': version(normal)}, 404)
+        self.assertIsNone(normal.get('receiptKey'))
+        for invalid in [values + [{'kind': 'profit', 'amount': '1'}], [{'kind': 'profit', 'contractId': c1['id'], 'amount': '1'}],
+                        [{'kind': 'contract', 'contractId': unlinked['id'], 'amount': '1'}], [{'kind': 'profit', 'amount': '1001'}]]:
+            self.call(self.admin, 'PUT', url, {**body, 'allocations': invalid}, 400)
+            self.assertEqual(version(self.call(self.admin, 'GET', f'/api/transactions/{rid}')), version(root))
+        saved = self.call(self.admin, 'PUT', url, body)
+        self.assertEqual(saved['receiptKey'], key)
+        self.assertIsNone(saved['contractId'])
+        self.assertEqual(saved['unallocatedAmount'], 250)
+        self.assertEqual(saved['versions'][0]['allocations'], [])
+        self.assertEqual(len(saved['allocations']), 3)
+        self.assertEqual(saved['attachments'], root['attachments'])
+        self.assertEqual(len(self.call(self.admin, 'GET', '/api/transactions')['items']),
+                         len(self.call(self.admin, 'GET', '/api/state')['transactions']))
+        self.call(self.admin, 'PUT', url, body, 409)
+        self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(saved), 'receiptKey': 'CHANGE01'}, 422)
+        with self.connect_test() as connection:
+            from contracts import received
+            self.assertEqual(received(connection, c1['id']), 300)  # Contract is overpaid by100.
+            self.assertEqual(received(connection, c2['id']), 200)
+            # Only one table was introduced; existing transactions have no receipt columns.
+            self.assertEqual(connection.execute("SELECT count(*) AS n FROM information_schema.columns WHERE table_name='transactions' AND column_name IN ('receipt_key','receipt_parent_id')").fetchone()['n'], 0)
+        refund_body = {'expectedVersion': version(saved), 'amount': '200', 'description': 'Unused money returned'}
+        self.call(self.user, 'POST', f'/api/receipts/{rid}/returns', refund_body, 403)
+        self.call(self.admin, 'POST', f'/api/receipts/{rid}/returns', {**refund_body, 'amount': '251'}, 400)
+        def refund(_):
+            return self.admin.post(f'/api/receipts/{rid}/returns', headers={'X-Cashbook': '1'}, json=refund_body).status_code
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            self.assertEqual(sorted(executor.map(refund, range(2))), [201, 409])
+        root_after = self.call(self.admin, 'GET', f'/api/transactions/{rid}')
+        self.assertEqual((root_after['amount'], root_after['returnedAmount'], root_after['unallocatedAmount']), (1000, 200, 50))
+        grouped = [t for t in self.call(self.admin, 'GET', '/api/transactions')['items'] if t.get('receiptKey') == key]
+        self.assertEqual(len(grouped), 2)
+        child = next(t for t in grouped if t.get('receiptParentId'))
+        self.assertEqual(child['receiptParentId'], rid)
+        self.assertEqual(child['amount'], 200)
+        self.assertEqual(child['allocations'], [])
+        # Allocation edits never move money. Only receipt +1000, normal payment-10 and return-200 do.
+        self.assertEqual(self.call(self.admin, 'GET', f'/api/users/{admin_id}/overview')['balance'], before + 790)
+        self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(root_after), 'input': {**receipt_input, 'amount': '900'}}, 400)
+        self.call(self.admin, 'PUT', f'/api/transactions/{rid}/status', {'expectedVersion': version(root_after), 'active': False}, 400)
+        self.call(self.admin, 'DELETE', f'/api/transactions/{rid}?expectedVersion={version(root_after)}', expected=400)
+        self.call(self.admin, 'PUT', f"/api/transactions/{child['id']}", {'expectedVersion': version(child), 'input': {'amount': '1'}}, 400)
+        inactive = self.call(self.admin, 'PUT', f"/api/transactions/{child['id']}/status", {'expectedVersion': version(child), 'active': False})
+        self.assertEqual(self.call(self.admin, 'GET', f'/api/transactions/{rid}')['unallocatedAmount'], 250)
+        filled = self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(root_after), 'allocations': [*values[:2], {'kind': 'profit', 'amount': '500'}]})
+        self.assertEqual(filled['unallocatedAmount'], 0)
+        self.call(self.admin, 'PUT', f"/api/transactions/{child['id']}/status", {'expectedVersion': version(inactive), 'active': True}, 400)
+        # Full contract allocation through the existing input path still works, and
+        # history prevents unlink/deletion even after current allocations are moved.
+        legacy = self.call(self.admin, 'POST', '/api/transactions/credits', {'userId': admin_id, 'creditUserId': payer_id, 'contractId': c2['id'], 'input': {'amount': '600'}}, 201)
+        self.assertEqual(legacy['allocations'][0]['amount'], 600)
+        self.assertEqual(legacy['unallocatedAmount'], 0)
+        self.call(self.admin, 'PUT', f"/api/contracts/{c1['id']}?expectedRevision=1", {'name': c1['name'], 'totalAmount': '100', 'creditUserIds': [payer_id]})
+        self.call(self.admin, 'PUT', f"/api/contracts/{c1['id']}?expectedRevision=2", {'name': c1['name'], 'totalAmount': '100', 'creditUserIds': [other_payer]}, 400)
+        self.call(self.admin, 'DELETE', f"/api/contracts/{c1['id']}?expectedRevision=2", expected=400)
+        # Undo/restore stays auditable and rechecks the available cash.
+        off = self.call(self.admin, 'PUT', f'/api/transactions/{rid}/status', {'expectedVersion': version(filled), 'active': False})
+        on = self.call(self.admin, 'PUT', f'/api/transactions/{rid}/status', {'expectedVersion': version(off), 'active': True})
+        self.assertEqual(on['receiptKey'], key)
+        self.assertEqual(on['allocations'], filled['allocations'])
+        reduced = self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(on), 'allocations': [*values[:2], {'kind': 'profit', 'amount': '300'}]})
+        restored = self.call(self.admin, 'PUT', f"/api/transactions/{child['id']}/status", {'expectedVersion': version(inactive), 'active': True})
+        self.assertEqual(restored['receiptKey'], key)
+        self.assertEqual(self.call(self.admin, 'GET', f'/api/transactions/{rid}')['unallocatedAmount'], 0)
+        # Archived contract attribution can be kept or reduced, but not increased.
+        self.call(self.admin, 'PUT', f"/api/contracts/{c1['id']}/status", {'expectedRevision': 2, 'active': False})
+        keep = self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(reduced), 'allocations': [*values[:2], {'kind': 'profit', 'amount': '300'}]})
+        self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(keep), 'allocations': [{**values[0], 'amount': '301'}, values[1]]}, 400)
 
 
 if __name__ == '__main__':

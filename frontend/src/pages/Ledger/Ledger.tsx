@@ -13,6 +13,7 @@ import { TransactionCard } from './TransactionCard';
 import './Ledger.css';
 import { LedgerFilters } from './LedgerFilters';
 import { selectedEntriesReport, toggleEntry } from './entrySelection';
+import { allocationLabel, contractStatementEntries } from './receiptModel';
 
 export interface EntrySelection {
   active: boolean; ids: Set<string>; toggle: (id: string, shift?: boolean) => void;
@@ -23,6 +24,7 @@ const filterKey = (filters: FiltersState) => JSON.stringify([
   filters.dateFrom, filters.dateTo, filters.userScope, filters.direction, filters.headId ?? null, filters.description ?? '', filters.timeFrom ?? '', filters.timeTo ?? '',
   filters.contractId ?? null,
   filters.showAdminPayable !== false,
+  filters.receiptKey ?? '',
 ]);
 export function Ledger({ filters: suppliedFilters, revision, heads, users, onDirtyChange, onFilterChange, company = false, onChanged, attachmentReview, contract, contractUserId }: {
   contract?: Contract; contractUserId?: string;
@@ -32,7 +34,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
 }) {
   const fixedScope = contract ? { contractId: contract.id, userScope: contractUserId ? `credit:${contractUserId}` : 'all' } : {};
   const contractColumn = !!contract || suppliedFilters.userScope.startsWith('credit:');
-  const filters = { ...suppliedFilters, ...((company || contractColumn) ? { headId: null } : {}), ...(!contractColumn ? { contractId: undefined } : {}), ...fixedScope };
+  const filters = { ...suppliedFilters, ...((company || contractColumn) ? { headId: null } : {}), ...(!contractColumn ? { contractId: undefined } : {}), ...(!company || contract ? { receiptKey: undefined } : {}), ...fixedScope };
   const [data, setData] = useState<LedgerData | null>(null);
   const [order, setOrder] = useState<LedgerOrder>(attachmentReview ? 'by-head' : 'by-time');
   const groupDirections = order === 'credit-first' || order === 'debit-first';
@@ -74,7 +76,8 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const transactions = (data?.transactions ?? []).filter((entry) => company
     ? isCompanyTransaction(entry)
     : attachmentReview || !(data?.users ?? users).some((user) => user.user_id === entry.userId && user.role === 'admin'));
-  const report = ledgerReport(transactions, filters, order, reportHeads, company);
+  const scopedTransactions = contract ? contractStatementEntries(transactions, contract.id) : transactions;
+  const report = ledgerReport(scopedTransactions, filters, order, reportHeads, company);
   const selectedIds = new Set(selectionActive ? report.rows.filter(({ entry }) => selection.ids.has(entry.id)).map(({ entry }) => entry.id) : []);
   function toggleSelection(id: string, shift = false) {
     setSelection((current) => ({ ...current,
@@ -96,7 +99,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const userName = (id: string) => id.startsWith('credit:')
     ? data?.creditUsers.find((user) => user.credit_user_id === id.slice(7))?.user_name ?? 'Unavailable external user'
     : data?.users.find((user) => user.user_id === id)?.user_name ?? 'Unavailable account';
-  const openEntry = (entry: Transaction) => setSelected(entry);
+  const openEntry = (entry: Transaction) => setSelected(data?.transactions.find((original) => original.id === entry.id) ?? entry);
   const entryUserName = (entry: Transaction) => entry.creditUserId
     ? data?.creditUsers.find((user) => user.credit_user_id === entry.creditUserId)?.user_name ?? 'Unavailable external user'
     : company && (data?.users ?? users).some((user) => user.user_id === entry.userId && user.role === 'admin')
@@ -105,13 +108,13 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const receivedLabel = `Total received by ${filters.userScope === 'all' ? 'users' : userName(filters.userScope)}`;
   const branchLabel = filters.headId == null ? '' : `${headPath(reportHeads, filters.headId)} · Includes subheads`;
   const dateLabel = dateRangeLabel(filters);
-  const contractName = (id?: string | null) => !id || id === '__none__' ? 'No contract' : data?.contracts?.find((item) => item.id === id)?.name ?? contract?.name ?? 'Unavailable contract';
+  const contractName = (id?: string | null) => !id || id === '__none__' ? 'Unallocated' : id === '__profit__' ? 'Company profit' : data?.contracts?.find((item) => item.id === id)?.name ?? contract?.name ?? 'Unavailable contract';
   const contractOptions = (data?.contracts ?? []).filter((item) => !filters.userScope.startsWith('credit:') || item.creditUserIds.includes(filters.userScope.slice(7)) || transactions.some((entry) => entry.contractId === item.id && matchesUserScope(entry, filters.userScope)));
   const subtitle = [branchLabel, !company && filters.showAdminPayable === false ? 'Admin payable excluded' : '', filters.contractId ? `Contract: ${contractName(filters.contractId)}` : '', dateLabel, company && filters.userScope !== 'all' ? userName(filters.userScope) : '', filters.description ? `Description: ${filters.description}` : ''].filter(Boolean).join(' · ');
   const columns = ['Date/time', 'User', 'Entered by', contractColumn ? 'Contract' : 'Head', 'Description', 'Credit', 'Debit', 'Balance'];
   const entryCells = (entry: Transaction, balance: number): (string | number)[] => [
     new Date(entry.createdAt).toLocaleString(), entryUserName(entry), userName(entry.createdBy),
-    contractColumn ? contractName(entry.contractId) : entry.headPath ?? headPath(data?.heads ?? [], entry.headId), [adminPayableLabel(entry), !contractColumn && entry.contractId ? `Contract: ${data?.contracts?.find((item) => item.id === entry.contractId)?.name ?? entry.contractId}` : '', entry.description ?? ''].filter(Boolean).join(' · '),
+    contractColumn ? contract ? contract.name : allocationLabel(entry, contractName) : entry.headPath ?? headPath(data?.heads ?? [], entry.headId), [adminPayableLabel(entry), !contractColumn && entry.creditUserId ? allocationLabel(entry, contractName) : '', entry.description ?? ''].filter(Boolean).join(' · '),
     entryDirection(entry) === 'credit' ? entry.amount : '', entryDirection(entry) === 'debit' ? entry.amount : '', balance,
   ];
   const totalCells = (label: string, balance: number, credit: number | string = '', debit: number | string = ''): (string | number)[] => [label, '', '', '', '', credit, debit, balance];
@@ -148,6 +151,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
     {!attachmentReview && <h1>{title}</h1>}
     {(subtitle || !attachmentReview && filters.userScope !== 'all') && <div className="active-filters flex-row flex-wrap gap-sm"><span>{[subtitle, !company && filters.userScope !== 'all' ? userName(filters.userScope) : ''].filter(Boolean).join(' · ')}</span></div>}
     <div className="ledger-toolbar flex-row flex-wrap gap-sm">
+      {company && !contract && !attachmentReview && <label className="field"><span>Search Receipt ID</span><input type="search" maxLength={8} placeholder="8-character receipt ID" value={draftFilters.receiptKey ?? ''} onChange={(event) => stageFilters({ ...draftFilters, receiptKey: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} /></label>}
       {!company && <button className="btn" aria-pressed={filters.showAdminPayable !== false} onClick={() => {
         const showAdminPayable = filters.showAdminPayable === false;
         const next = { ...filters, showAdminPayable };
@@ -193,7 +197,9 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
         {pageRows(currentPage).map(({ cells, entry: rowEntry }, index) => {
           return <tr ref={rowEntry && rowEntry.id === report.rows.at(-1)?.entry.id ? lastEntry : undefined} key={rowEntry ? `transaction:${rowEntry.id}` : `total:${index}`} className={rowEntry ? `ledger-entry${selectedIds.has(rowEntry.id) ? ' entry-selected' : ''}` : 'ledger-total'} onClick={(event) => { if (rowEntry) { if (selectionActive) toggleSelection(rowEntry.id, event.shiftKey); else openEntry(rowEntry); } }}>
             {selectionActive && <td>{rowEntry && <input type="checkbox" aria-label={`Select entry ${rowEntry.id}`} checked={selectedIds.has(rowEntry.id)} onClick={(event) => { event.stopPropagation(); toggleSelection(rowEntry.id, event.shiftKey); }} onChange={() => {}} />}</td>}
-            {cells.map((value, column) => <td key={column} className={column >= 5 ? 'ledger-amount' : undefined}>{column === 0 && rowEntry && !selectionActive ? <button className="ledger-row-link" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>{value}</button> : typeof value === 'number' ? money(value) : value}</td>)}
+            {cells.map((value, column) => <td key={column} className={column >= 5 ? 'ledger-amount' : undefined}>{column === 0 && rowEntry && !selectionActive ? <button className="ledger-row-link" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>{value}</button> : typeof value === 'number' ? money(value) : value}
+              {column === 4 && rowEntry?.receiptKey && !rowEntry.receiptParentId && !selectionActive && <button className="btn receipt-details-button" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>Show all allocations</button>}
+            </td>)}
           </tr>;
         })}
       </tbody></table></div>
@@ -205,8 +211,8 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
         <button className="btn" disabled={currentPage + 1 === pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
       </div>
       {!attachmentReview && <details className="disclosure" open={showInactive} onToggle={(event) => setShowInactive(event.currentTarget.open)}><summary>Deactivated entries</summary>
-        {transactions.filter((entry) => !entry.active && (company || filters.showAdminPayable !== false || !adminPayableLabel(entry)) && matchesContractScope(entry, filters.contractId) && matchesUserScope(entry, filters.userScope) && (!branch || (entry.headId !== null && branch.has(entry.headId)))).map((entry) =>
-          <button className="btn" key={entry.id} onClick={() => setSelected(entry)}>{new Date(entry.createdAt).toLocaleString()} · {entryUserName(entry)} · {money(entry.amount)}</button>)}
+        {scopedTransactions.filter((entry) => !entry.active && (!company || !filters.receiptKey || entry.receiptKey?.includes(filters.receiptKey.trim().toUpperCase())) && (company || filters.showAdminPayable !== false || !adminPayableLabel(entry)) && matchesContractScope(entry, filters.contractId) && matchesUserScope(entry, filters.userScope) && (!branch || (entry.headId !== null && branch.has(entry.headId)))).map((entry) =>
+          <button className="btn" key={entry.id} onClick={() => openEntry(entry)}>{new Date(entry.createdAt).toLocaleString()} · {entryUserName(entry)} · {money(entry.amount)}</button>)}
       </details>}
     </>}
     {selectionActive && <div className="entry-selection-bar flex-row flex-wrap items-center gap-sm" role="region" aria-label="Selected entry actions">

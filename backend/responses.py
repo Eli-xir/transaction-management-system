@@ -40,6 +40,13 @@ class AttachmentResource(BaseModel):
     url: str
 
 
+class AllocationResource(BaseModel):
+    kind: Literal['contract', 'profit']
+    contractId: str | None
+    contractName: str
+    amount: float
+
+
 class TransactionValues(BaseModel):
     amount: float
     headId: int | None
@@ -50,6 +57,7 @@ class TransactionValues(BaseModel):
     contractId: str | None
     contractName: str
     attachments: list[AttachmentResource]
+    allocations: list[AllocationResource] = Field(default_factory=list)
 
 
 class TransactionVersion(TransactionValues):
@@ -60,6 +68,10 @@ class TransactionVersion(TransactionValues):
 
 
 class TransactionResource(TransactionValues):
+    receiptKey: str | None = None
+    receiptParentId: str | None = None
+    returnedAmount: float = 0
+    unallocatedAmount: float = 0
     id: str
     userId: str
     createdBy: str

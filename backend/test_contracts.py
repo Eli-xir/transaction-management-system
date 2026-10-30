@@ -10,11 +10,19 @@ from service import revise, transaction_change
 
 
 class ContractTests(unittest.TestCase):
+    def setUp(self):
+        # These isolate the legacy adapter; receipt persistence is covered by
+        # real database tests, not the adapter's synthetic SQL result objects.
+        for target, value in [('receipts.metadata', None), ('receipts.allocations', []), ('receipts.returned', Decimal(0))]:
+            mock = patch(target, return_value=value)
+            mock.start()
+            self.addCleanup(mock.stop)
+
     def test_direct_receipt_assignment_is_one_version_checked_against_remaining(self):
         target, payer, admin_id = uuid4(), uuid4(), uuid4()
         db = Mock()
         entry = {'transaction_id': 12, 'current_version_id': 4, 'contract_id': None,
-                 'credit_user_id': payer, 'is_active': True, 'user_id': admin_id, 'created_by_user_id': admin_id}
+                 'credit_user_id': payer, 'is_active': True, 'user_id': admin_id, 'created_by_user_id': admin_id, 'name': 'Contract'}
         db.execute.return_value.fetchone.return_value = entry
         change = TransactionChange(op='transaction', action='edit', id=12, expectedVersion=4, contractId=target,
                                    input={'amount': '400', 'description': 'Existing receipt', 'headId': None})
@@ -82,17 +90,18 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(update.args[1][-2:], (target, 12))
             self.assertFalse(any(call.args[0].startswith('UPDATE transaction_versions') for call in db.execute.call_args_list))
 
-    def test_shared_remaining_and_edit_exclusion_are_checked_under_lock(self):
+    def test_contract_and_payer_are_checked_under_lock_without_capping_overpayment(self):
         db = Mock()
         db.execute.return_value.fetchone.side_effect = [
             {'is_active': True, 'total_amount': Decimal('1000')}, {'linked': True}, {'amount': Decimal('700')}]
-        validate_receipt(db, 'contract', 'payer', Decimal('300'), 42)
+        validate_receipt(db, 'contract', 'payer', Decimal('3000'), 42)
         self.assertIn('FOR UPDATE', db.execute.call_args_list[0].args[0])
-        self.assertEqual(db.execute.call_args_list[2].args[1], ('contract', 42, 42))
+        self.assertEqual(db.execute.call_args_list[1].args[1], ('contract', 'payer'))
+        self.assertEqual(len(db.execute.call_args_list), 2)
 
-    def test_overpayment_unlinked_archived_and_zero_receipts_are_rejected(self):
+    def test_unlinked_archived_and_zero_receipts_are_rejected(self):
         for active, linked, amount, message in [
-            (True, True, '301', 'exceeds'), (True, False, '1', 'not linked'),
+            (True, False, '1', 'not linked'),
             (False, True, '1', 'Reactivate'), (True, True, '0', 'greater than zero')]:
             db = Mock()
             db.execute.return_value.fetchone.side_effect = [
@@ -138,11 +147,11 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(inserts[0][1], ('Shared', '', Decimal('1000')))
         self.assertEqual([args[1] for args in inserts[1:]], [(contract_id, payer1), (contract_id, payer2)])
 
-    def test_edit_cannot_reduce_total_below_receipts_or_unlink_receipt_history(self):
+    def test_edit_cannot_unlink_receipt_history_even_when_contract_is_overpaid(self):
         payer1, payer2, contract_id = uuid4(), uuid4(), uuid4()
-        for total, message in [('100', 'less than payments'), ('1000', 'cannot be unlinked')]:
+        for total, message in [('100', 'cannot be unlinked'), ('1000', 'cannot be unlinked')]:
             db = Mock()
-            db.execute.return_value.fetchone.side_effect = [{'revision': 1}, {'amount': Decimal('500')}, {'history': True}]
+            db.execute.return_value.fetchone.side_effect = [{'revision': 1}, {'history': True}]
             db.execute.return_value.fetchall.side_effect = [
                 [{'credit_user_id': payer1}, {'credit_user_id': payer2}], [{'credit_user_id': payer1, 'is_active': True}]]
             change = ContractChange(op='contract', action='edit', contractId=contract_id, expectedRevision=1,

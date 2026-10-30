@@ -36,6 +36,7 @@ export interface CreditUser {
 }
 
 export interface FiltersState {
+  receiptKey?: string;
   showAdminPayable?: boolean;
   contractId?: string;
   timeFrom?: string;
@@ -94,16 +95,23 @@ export interface Attachment { id: string; kind: 'image' | 'voice'; name: string;
 export interface ReferenceType { id: number; name: string; }
 export interface TransactionInput { amount: number; description?: string; headId: number | null; attachments: Attachment[]; transactionTypeId?: number; }
 export interface TransactionRevision extends TransactionInput {
+  allocations?: ReceiptAllocation[];
   contractId?: string | null; contractName?: string;
   versionId: string; recordedAt: string; editorId: string; action: string; active: boolean;
   headPath?: string;
 }
 export interface Transaction extends TransactionInput {
+  receiptKey?: string | null;
+  receiptParentId?: string | null;
+  allocations?: ReceiptAllocation[];
+  unallocatedAmount?: number;
+  returnedAmount?: number;
   contractId?: string | null;
   id: string; userId: string; createdBy: string; creditUserId?: string | null; active: boolean; createdAt: string;
   versions?: TransactionRevision[];
   headPath?: string;
 }
+export interface ReceiptAllocation { kind: 'contract' | 'profit'; contractId?: string | null; contractName?: string; amount: number; }
 export interface AppSession { userId: string; role: 'admin' | 'user'; }
 export interface AccountTotals { totalReceived: number; totalBillPayment: number; remainingPayable: number; }
 export interface UserOverview extends AccountTotals { balance: number; credits: Transaction[]; }

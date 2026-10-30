@@ -8,21 +8,20 @@ def require(condition, message, status=400):
 
 
 def received(db, contract_id, excluding=None):
-    return db.execute('''SELECT COALESCE(sum(v.transaction_amount),0) AS amount
+    return db.execute('''SELECT COALESCE(sum(a.amount),0) AS amount
         FROM transactions t JOIN transaction_versions v ON v.version_id=t.current_version_id
-        WHERE t.contract_id=%s AND t.is_active AND (%s::bigint IS NULL OR t.transaction_id<>%s)''',
+        JOIN receipt_allocations a ON a.version_id=v.version_id
+        WHERE a.contract_id=%s AND t.is_active AND (%s::bigint IS NULL OR t.transaction_id<>%s)''',
         (contract_id, excluding, excluding)).fetchone()['amount']
 
 
-def validate_receipt(db, contract_id, payer_id, amount, excluding=None):
+def validate_receipt(db, contract_id, payer_id, amount, excluding=None, *, allow_archived=False):
     contract = db.execute('SELECT * FROM contracts WHERE contract_id=%s FOR UPDATE', (contract_id,)).fetchone()
     require(contract, 'This contract no longer exists.', 404)
-    require(contract['is_active'], 'Reactivate this contract before recording a receipt.')
+    require(contract['is_active'] or allow_archived, 'Reactivate this contract before recording a receipt.')
     require(db.execute('SELECT 1 FROM contract_users WHERE contract_id=%s AND credit_user_id=%s',
                        (contract_id, payer_id)).fetchone(), 'This external user is not linked to the contract.')
     require(amount > 0, 'Enter a receipt amount greater than zero.')
-    remaining = contract['total_amount'] - received(db, contract_id, excluding)
-    require(amount <= remaining, f'The receipt exceeds this contract’s remaining amount (PKR {remaining:,.2f}). Refresh and try again.')
 
 
 def list_contracts(db):
@@ -56,9 +55,8 @@ def change_contract(db, actor, change):
                                     (value.name, value.description, value.totalAmount)).fetchone()['contract_id']
         else:
             contract_id = change.contractId
-            require(value.totalAmount >= received(db, contract_id), 'The contract amount cannot be less than payments already received.')
             removed = list(existing - set(ids))
-            require(not db.execute('SELECT 1 FROM transactions WHERE contract_id=%s AND credit_user_id=ANY(%s) LIMIT 1',
+            require(not db.execute('SELECT 1 FROM transactions t JOIN transaction_versions v USING(transaction_id) JOIN receipt_allocations a USING(version_id) WHERE a.contract_id=%s AND t.credit_user_id=ANY(%s) LIMIT 1',
                                    (contract_id, removed)).fetchone(), 'A user with receipt history cannot be unlinked. Keep them linked to preserve the statement.')
             db.execute('DELETE FROM contract_users WHERE contract_id=%s AND credit_user_id=ANY(%s)', (contract_id, removed))
             db.execute('UPDATE contracts SET name=%s,description=%s,total_amount=%s,revision=revision+1 WHERE contract_id=%s',
@@ -66,7 +64,7 @@ def change_contract(db, actor, change):
         for user_id in ids:
             db.execute('INSERT INTO contract_users VALUES (%s,%s) ON CONFLICT DO NOTHING', (contract_id, user_id))
     elif change.action == 'delete':
-        require(not db.execute('SELECT 1 FROM transactions WHERE contract_id=%s LIMIT 1', (change.contractId,)).fetchone(),
+        require(not db.execute('SELECT 1 FROM receipt_allocations WHERE contract_id=%s LIMIT 1', (change.contractId,)).fetchone(),
                 'This contract has receipt history. Archive it instead.')
         db.execute('DELETE FROM contract_users WHERE contract_id=%s', (change.contractId,))
         db.execute('DELETE FROM contracts WHERE contract_id=%s', (change.contractId,))

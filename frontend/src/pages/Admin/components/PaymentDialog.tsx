@@ -21,7 +21,7 @@ export function PaymentDialog({ userId, name, creditUserId, contract, remaining,
   const [discard, setDiscard] = useState(false);
   const dirty = !saved && !!(amount || description || attachments.length);
   const locked = busy || imageBusy || voiceBusy;
-  const valid = /^\d+(\.\d{1,2})?$/.test(amount) && Number(amount) > 0 && Number(amount) <= Math.min(remaining, 999999999999.99);
+  const valid = /^\d+(\.\d{1,2})?$/.test(amount) && Number(amount) > 0 && Number(amount) <= 999999999999.99;
   useEffect(() => { onDirtyChange(dirty); return () => onDirtyChange(false); }, [dirty, onDirtyChange]);
   useEffect(() => { onBusyChange(locked); return () => onBusyChange(false); }, [locked, onBusyChange]);
   function close() { if (locked) return; if (dirty) setDiscard(true); else onClose(); }
@@ -37,10 +37,10 @@ export function PaymentDialog({ userId, name, creditUserId, contract, remaining,
   }
   return <Dialog title={`Receive payment · ${name}`} onClose={close} busy={locked}>
     <p>Contract: <strong>{contract.name}</strong></p>
-    <p>Contract remaining: <strong>{money(remaining)}</strong></p>
+    <p>Contract {remaining < 0 ? 'payable' : 'remaining'}: <strong>{money(Math.abs(remaining))}</strong></p>
     {saved ? <><p role="status">Payment saved. If the balances did not refresh, close this window and press Refresh.</p><button className="btn" onClick={onClose}>Close</button></> : <form className="flex-col gap-md" onSubmit={(event) => { event.preventDefault(); if (valid) { if (review) void submit(); else setReview(true); } }}>
       {review ? <dl className="review-details"><dt>Received from</dt><dd>{name}</dd><dt>Amount</dt><dd>{money(Number(amount))}</dd><dt>Description</dt><dd>{description || '—'}</dd><dt>Attachments</dt><dd>{attachments.length}</dd></dl> : <>
-        <label className="field"><span>Amount (PKR)</span><input required type="number" inputMode="decimal" min="0.01" max={Math.min(remaining, 999999999999.99)} step="0.01" value={amount} disabled={locked} onChange={(event) => setAmount(event.target.value)} /></label>
+        <label className="field"><span>Amount (PKR)</span><input required type="number" inputMode="decimal" min="0.01" max="999999999999.99" step="0.01" value={amount} disabled={locked} onChange={(event) => setAmount(event.target.value)} /></label>
         <label className="field"><span>Description</span><textarea maxLength={4000} value={description} disabled={locked} onChange={(event) => setDescription(event.target.value)} /></label>
         <div>{(['image', 'voice'] as const).map((kind) => <section key={kind} inert={busy || (kind === 'image' ? voiceBusy : imageBusy)}><h3>{kind === 'image' ? 'Images' : 'Voice notes'}</h3><AttachmentInput kind={kind} items={attachments.filter((item) => item.kind === kind)} onBusyChange={kind === 'image' ? setImageBusy : setVoiceBusy}
           onChange={(items) => setAttachments((current) => [...current.filter((item) => item.kind !== kind), ...items])} /></section>)}</div>

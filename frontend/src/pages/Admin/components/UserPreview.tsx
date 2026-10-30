@@ -2,7 +2,6 @@ import { Icon } from '../../../Icon';
 import { useEffect, useRef, useState } from 'react';
 import type { AdminUser, Attachment, Contract, CreditUser, Head, Transaction, UserOverview } from '../types';
 import { ReceiptContractPicker } from './ReceiptContractPicker';
-import { contractBalance } from '../utils/contractBalances';
 import { permittedHeads } from '../utils/permissions';
 import { cashbookApi } from '../../../data/cashbookApi';
 import { AttachmentInput } from './AttachmentInput';
@@ -63,7 +62,7 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
     ? head.parent_head_id === null || !visibleIds.has(head.parent_head_id)
     : head.parent_head_id === headId).sort((a, b) => a.head_name.localeCompare(b.head_name));
   const amountValid = amount.trim() !== '' && Number.isSafeInteger(Number(amount)) && Number(amount) > 0 && Number(amount) <= 999999999999;
-  const validContract = !contractId || !!selectedContract?.isActive && Number(amount) <= contractBalance(selectedContract, contractData.transactions).remaining;
+  const validContract = !contractId || !!selectedContract?.isActive;
   const validPersonal = adminPayable !== 'pay' || Number(amount) <= (overview?.balance ?? 0);
   const valid = amountValid && validContract && validPersonal && (directEntry || !!selectedHead?.is_transactionable);
   const dirty = !previewOnly && (amount !== '' || description !== '' || attachments.length > 0 || screen !== 'home');
@@ -258,7 +257,7 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
             {adminPayable && <><dt>Entry type</dt><dd>{adminPayable === 'add' ? 'Admin payable added' : 'Admin payable paid'}</dd></>}
           </dl>
           {!valid && <p role="alert">{adminCredit ? 'Go back and check the amount.' : 'Go back and check the amount and head.'}</p>}
-          {!validContract && <p role="alert">Go back and choose an active contract with enough remaining balance, or skip for a direct credit.</p>}
+          {!validContract && <p role="alert">Go back and choose an active contract, or skip for a direct credit.</p>}
         </div>
         {(['image', 'voice'] as const).map((kind) => attachments.some((item) => item.kind === kind) &&
           <div className="user-card-panel flex-col gap-sm" key={kind}>
