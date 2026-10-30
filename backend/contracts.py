@@ -36,6 +36,7 @@ def list_contracts(db):
 def change_contract(db, actor, change):
     require(actor['user_role_id'] == 1, 'Admin access is required.', 403)
     creating = change.action == 'create'
+    contract_id = change.contractId
     contract = None
     if not creating:
         contract = db.execute('SELECT * FROM contracts WHERE contract_id=%s FOR UPDATE', (change.contractId,)).fetchone()
@@ -72,3 +73,4 @@ def change_contract(db, actor, change):
     else:
         db.execute('UPDATE contracts SET is_active=%s,revision=revision+1 WHERE contract_id=%s',
                    (change.action == 'reactivate', change.contractId))
+    return contract_id

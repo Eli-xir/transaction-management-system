@@ -1,56 +1,190 @@
-> Current behavior: version 3 removes categories from the API/UI, adds descriptions, and makes permissions inherit through branches. See [migration and API changes](../database/migrations/README.md); that note supersedes older category and exact-head examples below.
+# Cashbook API
 
-# Backend and frontend communication points
+Run `uvicorn main:app --reload` from this folder. Configuration is loaded from
+`.env`; see the root README for PostgreSQL and initial administrator setup.
+Interactive request/response documentation is at `/docs`; OpenAPI is at
+`/openapi.json`. All resource routes are under `/api`.
 
-Run from this folder with `uvicorn main:app --reload` after activating `.venv`. Configuration is loaded from `.env` automatically. See the root README for setup and initial admin login.
+## Compatibility and accounting
 
-All amounts are in PKR. User overview `balance` is received minus paid (negative when the user is owed money); `remainingPayable` is paid minus received for the admin's payable summary. These are opposite perspectives of the same account.
+The frontend now uses the resource routes for reads and writes. `/state` and
+`/changes` remain compatibility adapters for older installed clients; their
+success responses and accounting workflows are preserved.
+No schema migration is required by this API refactor.
 
-Transaction `headPath` is resolved from the current head tree on every read, so renames and moves appear in both ledgers, transaction cards and exports. Each edit-trail version retains its original saved path.
+Amounts are PKR with at most two decimal places. Regular users submit their own
+bills against active transactionable heads they are permitted to use. They see
+received credits and their account totals, but never their own submitted bill
+history. Administrators manage accounts, heads, assignments, and transactions.
+Administrator advances/payments retain the existing direct-payment rules.
 
-`frontend/src/data/cashbookApi.ts` is the only client API adapter. Components use its existing functions; no component builds transaction requests independently. Responses use the frontend's `AdminUser`, `Head`, `Transaction`, `TransactionRevision` and `UserOverview` shapes. All permanent IDs are database-generated; negative head IDs exist only in an unapplied tree draft.
+External users are payers. Contracts share one total across their linked external
+users; there are no allocations per user. Receipts cannot exceed the contract's
+remaining amount. Assigning a previously direct receipt to a contract creates a
+new edit-trail version without recording another receipt. Transaction history
+snapshots contract names and head paths; current head paths follow the tree.
 
-| Route | Purpose |
+## Resource routes
+
+UUIDs identify users, external users, and contracts. Positive integer IDs identify
+transactions and attachments. Resource identity is supplied in the URL; request
+bodies cannot override it. Unknown body fields are rejected.
+
+| Method | Route | Purpose / request body |
+| --- | --- | --- |
+| GET | `/session` | Current `{userId, role}`, or null |
+| POST | `/session` | Login: `{username, password}` |
+| DELETE | `/session` | Revoke session and clear cookie |
+| GET | `/users` | Administrator's user directory, including inactive accounts |
+| POST | `/users` | Create: `{profile, password}` |
+| GET | `/users/{id}` | Administrator's view of one user |
+| PUT | `/users/{id}/profile` | Replace profile: `{user_name, description?, contacts?}` |
+| PUT | `/users/{id}/password` | Reset: `{password}`; revoke other sessions |
+| PUT | `/users/{id}/status` | `{active}` |
+| PUT | `/users/{id}/pin` | `{pinned}` |
+| DELETE | `/users/{id}` | Delete only when accounting history permits |
+| GET | `/users/{id}/overview` | Own account totals/current credits, or administrator preview |
+| GET | `/users/{id}/permissions` | Administrator: explicit rules; self: effective allowed heads |
+| PUT | `/users/{id}/permissions` | Replace rules: `{ids:[...]}`; negative IDs deny inheritance |
+| GET | `/permissions` | Administrator's complete signed permission-rule map |
+| GET | `/transaction-types` | Authenticated transaction type catalog |
+| GET | `/external-users` | Administrator's external user directory |
+| POST | `/external-users` | Create with a profile body |
+| GET | `/external-users/{id}` | One external user |
+| PUT | `/external-users/{id}/profile` | Replace profile |
+| PUT | `/external-users/{id}/status` | `{active}` |
+| PUT | `/external-users/{id}/pin` | `{pinned}` |
+| DELETE | `/external-users/{id}` | Delete only if unlinked and without history |
+| GET | `/contracts` | Administrator's contracts, shared total, revision and linked payer IDs |
+| POST | `/contracts` | `{name, description?, totalAmount, creditUserIds}` |
+| GET | `/contracts/{id}` | One contract |
+| PUT | `/contracts/{id}?expectedRevision=N` | Replace contract details with the create body |
+| PUT | `/contracts/{id}/status` | `{active, expectedRevision}`; false archives |
+| DELETE | `/contracts/{id}?expectedRevision=N` | Delete only without receipt history |
+| GET | `/transactions?userId=UUID&limit=100&offset=0` | Administrator ledger or regular user's current received credits |
+| GET | `/transactions/{id}` | One authorized transaction; regular users never receive edit history |
+| POST | `/transactions/bills` | Submit own bill: `{input}`; administrator preview cannot submit |
+| POST | `/transactions/credits` | Administrator credit: `{userId, creditUserId?, contractId?, input}` |
+| PUT | `/transactions/{id}` | Edit: `{expectedVersion, input, contractId?}` |
+| PUT | `/transactions/{id}/status` | `{active, expectedVersion}` |
+| DELETE | `/transactions/{id}?expectedVersion=N` | Delete using the current version |
+| GET | `/heads` | `{heads, revision}`; normal users receive permitted active heads |
+| POST | `/heads/batch` | Atomic tree draft: `{revision, changes:[...]}` |
+| GET | `/preferences/home-order` | Administrator's saved Home card order |
+| PUT | `/preferences/home-order` | `{ids:[...]}`; each supported card once |
+| POST | `/attachments` | Multipart `file` and `kind` (`image` or `voice`), up to 5 MiB |
+| GET | `/attachments/{id}?export=false` | Authorized private media |
+| POST | `/attachments/export` | Administrator report images: `{ids:[...]}` |
+
+Resource creation returns 201 with the created resource (bill submission returns
+`{id, applied:true}`). Updates return the updated resource. Deletes and password
+changes return 204. Login/logout keep their existing 200 responses.
+
+`GET /transactions` returns `{items, limit, offset, nextOffset}`. `limit` is 1–500,
+default 100; a null `nextOffset` means there are no more entries. Entries retain
+the existing ascending transaction-date/ID order. Concurrent edits may move an
+offset page; refresh the ledger when a coherent new report is needed. The
+compatibility `/state` snapshot remains complete for older clients.
+
+Resource reads return `X-Cashbook-Snapshot`, an opaque token bound to the account
+and PostgreSQL transaction snapshot. Send it on subsequent resource requests and
+ledger pages that must form one consistent UI/report. If it changed, the server
+returns 409 with `X-Cashbook-Retry-Read: 1`. Discard the partial read and start
+again. The frontend retries the complete read at most twice, never publishes
+partial totals, and never retries writes. Background ledger reads do not advance
+the revision attached to an existing head draft.
+
+`input` is `{amount, headId?, description?, transactionTypeId?:1,
+attachments?:[{id,kind,name,url}]}`. Only attachment IDs are authoritative;
+display names, kinds and URLs supplied in this reference cannot replace stored
+metadata. Regular-user uploads must belong to that user and be unused.
+
+Head operations are `create`, `edit`, `move`, `merge`, `delete`, `backup`, and
+`active`, documented in OpenAPI. A single batch preserves temporary negative
+IDs, merges, permission inheritance, and all-or-nothing draft application.
+The server retains the existing tree/accounting semantics, including descendant
+deactivation, branch deletion, and inactive history-preserving backups.
+
+## Existing frontend adapters
+
+| Route | Preserved response |
 | --- | --- |
-| GET /api/session | Current `{userId, role}` or null |
-| POST /api/session | `{username, password}` → session; sets HttpOnly, SameSite=Strict cookie |
-| DELETE /api/session | Revoke current session and clear cookie |
-| GET /api/state | Admin: full heads/users/permissions/transactions/catalogs, including deactivated backup copies. User: own minimal profile, own exact permissions, permitted active heads and catalogs; no transaction rows or contacts |
-| GET /api/state?userId=UUID | User overview: credits only plus received/bill/payable totals. Admin can preview any user; regular users can request only themselves |
-| POST /api/changes | One validated change command; applies atomically |
-| POST /api/attachments | Multipart `file`, `kind` (`image` or `voice`); maximum 5 MB/file; returns attachment metadata |
-| GET /api/attachments/ID | Authenticated media; admin, permitted head image, current received credit evidence, or own unused draft upload only |
+| `GET /state` | Role-filtered heads/users/permissions/transactions/contracts/catalogs/preferences |
+| `GET /state?userId=UUID` | Own account overview or administrator preview |
+| `POST /changes` | Existing discriminated command (`op` and `action`) and success body |
 
-All writes require `X-Cashbook: 1`, which the adapter supplies. There is no cross-origin API allowance: use the Vite `/api` proxy. Sessions expire after seven days and the backend checks active status on each request. Set `COOKIE_SECURE=true` when moving to HTTPS. Passwords use salted scrypt hashes; credentials are not returned to the frontend.
+The adapter and resource routes call the same accounting services. Neither has a
+weaker authorization path. Contract/transaction edits require the current
+revision/version and return 409 if stale. Automatic retries of money-changing
+requests are unsafe and are not performed. After an interrupted write, refresh
+and check whether it was recorded before submitting it again.
 
-The change endpoint has these command shapes:
+## Security and failures
 
-```text
-{op:"user", action:"create", profile:{user_name, contacts}, password}
-{op:"user", action:"profile", userId, profile:{user_name, contacts}}
-{op:"user", action:"password", userId, password}
-{op:"user", action:"deactivate"|"reactivate"|"delete", userId}
-{op:"permissions", userId, ids:[headId,...]}
-{op:"heads", revision, changes:[...staged changes...]}
-{op:"category", name}
-{op:"category", action:"delete", id}
-{op:"transaction", action:"submit"|"credit", userId, input}
-{op:"transaction", action:"edit", id, expectedVersion, input}
-{op:"transaction", action:"deactivate"|"reactivate"|"delete", id, expectedVersion}
+All writes require `X-Cashbook: 1`; cross-site fetch mutations are rejected. CORS
+is not enabled. Use the same-origin frontend proxy. Sessions are HttpOnly,
+SameSite=Strict, expire after seven days, and require an active user. Set
+`COOKIE_SECURE=true` in HTTPS production (already set by deployment); local HTTP
+development uses false. Passwords use salted scrypt hashes and never appear in
+resource responses. Credentials are locked during login so password changes and
+session revocation cannot race a login using old credentials.
+
+Login is limited to 20 attempts per minute per effective client address, with
+429 and `Retry-After`. This bounded limiter is per backend process. If adding
+workers/instances, enforce a shared limit at the trusted proxy. The server uses
+the address supplied by the ASGI server, never independently trusts a client
+`X-Forwarded-For` header; restrict trusted proxies and keep the backend private.
+
+Errors retain `{detail: string}` or validation `{detail:[{loc,msg,type}]}` for
+the current frontend. Statuses: 400 business rule, 401 expired/absent session,
+403 forbidden, 404 unavailable resource, 409 stale/conflicting record, 413 export
+too large, 422 invalid input, 429 login throttling, 503 dependency unavailable.
+Unexpected errors return a generic 500. Internal errors/inputs are not exposed
+in responses. Every response has no-store, nosniff and a generated X-Request-ID
+for troubleshooting. Logs never intentionally include credentials or bodies.
+
+Private attachments retain authorization checks before storage access. Storage
+outages receive a useful error. Exports read at most 5 MiB per file and 50 MiB
+total raw image bytes; larger reports must select fewer entries per export to
+avoid exhausting server memory. Files used by history/backups remain retained.
+
+## Code boundaries and transactions
+
+- `main.py`: application composition, transport policy, safe error responses,
+  legacy adapter routes.
+- `auth.py`: sessions, cookies, credential locking and login throttling.
+- `api_dependencies.py`: request-scoped database connection, authentication and
+  shared/exclusive ledger locks acquired before authentication.
+- `resources.py`, `resource_models.py`, `responses.py`, `queries.py`: resource
+  routing, request validation and public serialization.
+- `commands.py`: shared legacy/resource command execution and explicit commit.
+- `service.py`, `contracts.py`: existing accounting and permission rules.
+- `attachments.py`, `storage.py`: upload/download authorization and storage.
+- `db.py`, `models.py`: existing connection/bootstrap and domain input schemas.
+
+Each request owns a PostgreSQL transaction. Mutations retain the established
+advisory lock so tree, permission, deletion and transaction operations cannot
+race each other. Multi-query ledger reads hold its shared lock. Authentication
+is checked after waiting for that lock. Resource responses are assembled before
+commit; commits (including deferred constraints) finish before a success response.
+Dependency cleanup also runs before sending responses. No schema, money formula,
+ORM, queue, cache, or database migration was introduced by this refactor.
+
+## Verification
+
+Install test dependencies with `python -m pip install -r requirements-dev.txt`.
+From this directory run:
+
+```powershell
+python -m unittest discover -p 'test_*.py'
+python -m compileall -q . -x .venv
 ```
 
-`input` is `{amount, headId, categoryId, transactionTypeId?:1, attachments:[{id,kind,name,url}]}`. Only attachment IDs are authoritative; the server ignores supplied display metadata. A normal user can only submit a bill for themselves, against an active, transactionable, explicitly assigned head, using their own unused uploads. Admin submissions of user bills are rejected with 403; preview cannot submit. Admin can credit a user through the separate credit action. Category choice never filters the head tree.
-
-Head changes use the existing `StagedChange` union: create (temporary negative ID), edit, move, merge, delete, backup and active (true/false). A manual backup is `{op:"backup", head_id}`; merge accepts `backup:true` to copy its source branch first. Backups create new head, transaction and version IDs, retain immutable attachment references and original transaction dates/authors, and append a Backup created version. The root copy goes to the top level; every copied head has a dated Backup suffix. All copied heads and transactions are deactivated. Existing permissions are unchanged and new copies have no assignments. Deletion has no backup-file option and permanently removes only the selected head's transactions, promoting its children. The server resolves temporary IDs in sequence and applies the whole batch atomically. Head revision and transaction expected-version conflicts return 409 rather than overwriting another session. Permission changes replace exactly the specified user's assignments. They do not affect other users or descendants.
-
-Category removal deactivates the category for future selections while retaining historical references. Creating a previously removed category name reactivates it. Removed categories cannot be used in new or edited transaction input.
-
-Profile, permissions, heads, category and account actions return a fresh admin state. Create-user returns `{data, user}`. Credit/edit/status returns the updated transaction including its edit trail; delete returns null. Bill submission returns `{id, applied:true}` without exposing a bill history. Attachment upload returns `{id, kind, name, url}`.
-
-Errors use HTTP 400/403/404/409/422 with `detail`; expired authentication uses 401. The adapter turns them into existing form errors and sends expired sessions back to login. No automatic retries of transaction writes are performed.
-
-State is deliberately small-scale: full admin data per read and one short PostgreSQL transaction per mutation. A database write lock serializes mutations to keep permission checks, submissions and head operations consistent; state readers share a read lock so a deletion cannot interrupt their multi-query response. No server ledger/report variants: filtering, pagination and export continue using the same client report model.
-
-## Production storage
-
-Docker sets DATABASE_URL and COOKIE_SECURE=true. When CASHBOOK_S3_BUCKET is configured, storage.py saves private S3 media and returns short-lived signed downloads after authorization. Otherwise local uploads continue to work. See ../deploy/README.md for production configuration and backups.
+Unit and HTTP tests cover resource/legacy parity, authorization, request shapes,
+public response filtering, lock ordering, commit failures, contracts, upload
+failures, and bounded exports. `test_database_api.py` additionally exercises
+accounting and concurrency against a disposable PostgreSQL database. It is
+skipped unless `CASHBOOK_TEST_DATABASE_URL` is explicitly set, refuses a nonlocal
+or nonempty database, and never uses the application DATABASE_URL. The file
+contains commands to create and remove a temporary test container. CI runs it
+against a fresh PostgreSQL service.

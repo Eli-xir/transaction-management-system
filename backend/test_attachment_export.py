@@ -41,10 +41,22 @@ class AttachmentExportTests(unittest.TestCase):
                 storage.response(self.row, export=True)
         self.assertEqual(caught.exception.status_code, 404)
 
+    def test_export_reads_at_most_one_attachment_limit_and_closes_body(self):
+        body = Mock()
+        body.read.return_value = b'x' * (storage.MAX_ATTACHMENT_BYTES + 1)
+        client = Mock()
+        client.get_object.return_value = {'Body': body}
+        with patch.object(storage, 'BUCKET', 'test-bucket'), patch.object(storage, 's3', return_value=client):
+            with self.assertRaises(HTTPException) as caught:
+                storage.response(self.row, export=True)
+        self.assertEqual(caught.exception.status_code, 413)
+        body.read.assert_called_once_with(storage.MAX_ATTACHMENT_BYTES + 1)
+        body.close.assert_called_once()
+
     def test_export_cannot_bypass_attachment_permissions(self):
         db = Mock()
         db.execute.return_value.fetchone.side_effect = [self.row, None]
-        with patch('main.user_permissions', return_value=[]), patch.object(storage, 'response') as response:
+        with patch('attachments.user_permissions', return_value=[]), patch.object(storage, 'response') as response:
             with self.assertRaises(HTTPException):
                 download_attachment(42, db, {'user_role_id': 2, 'user_id': 'other-user'}, export=True)
             response.assert_not_called()

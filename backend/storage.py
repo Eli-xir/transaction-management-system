@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from db import UPLOADS
 
 BUCKET = os.getenv('CASHBOOK_S3_BUCKET', '')
+MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 
 
 @lru_cache
@@ -41,12 +42,14 @@ def response(row, export=False):
             try:
                 body = s3().get_object(Bucket=BUCKET, Key=row['attachment_url'])['Body']
                 try:
-                    content = body.read()
+                    content = body.read(MAX_ATTACHMENT_BYTES + 1)
                 finally:
                     body.close()
             except ClientError as error:
                 missing = error.response.get('Error', {}).get('Code') in ('NoSuchKey', '404')
                 raise HTTPException(404 if missing else 502, 'Attachment file is missing.' if missing else 'Could not load attachment from storage.') from error
+            if len(content) > MAX_ATTACHMENT_BYTES:
+                raise HTTPException(413, 'This attachment is too large to export.')
             return Response(content, media_type=row['content_type'], headers={'Cache-Control': 'no-store'})
         url = s3().generate_presigned_url('get_object', Params={
             'Bucket': BUCKET, 'Key': row['attachment_url'],

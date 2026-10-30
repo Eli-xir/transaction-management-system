@@ -67,7 +67,21 @@ test('head name and image edits are staged together without mutating the saved t
   assert.equal(original[1].head_name, 'Materials');
   assert.equal(edited[1].parent_head_id, original[1].parent_head_id);
   assert.match(describeChanges(original, edits)[0], /Materials → Supplies/);
-  assert.throws(() => applyHeadChanges(original, [{ ...edits[0], head_name: 'Other' } as StagedChange]), /already exists/);
+  assert.equal(applyHeadChanges(original, [{ ...edits[0], head_name: 'Other' } as StagedChange])[1].head_name, 'Other',
+    'The same name is allowed under different parents');
+  const withSibling = [...original, head(5, 'Supplies', 1)];
+  assert.throws(() => applyHeadChanges(withSibling, edits), /already exists/);
+});
+
+test('duplicate names are checked among siblings after creation and moves', () => {
+  const withOtherMaterials = [...original, head(5, 'Materials', 3)];
+  assert.throws(() => applyHeadChanges(withOtherMaterials, [
+    { op: 'create', temp_id: -1, head_name: 'Materials', parent_head_id: 1 },
+  ]), /already exists/);
+  assert.throws(() => applyHeadChanges(withOtherMaterials, [
+    { op: 'move', head_id: 2, new_parent_id: 3 },
+  ]), /already exists/);
+  assert.equal(original[1].parent_head_id, 1, 'A rejected draft must not mutate the saved tree');
 });
 
 test('transactionable setting survives create/edit history and review', () => {
@@ -81,27 +95,40 @@ test('transactionable setting survives create/edit history and review', () => {
   assert.match(describeChanges([], changes)[1], /; transactionable/);
 });
 
-test('deleting one head preserves children, and replay restores undo/redo exactly', () => {
-  const changes: StagedChange[] = [{ op: 'delete', head_id: 2, transaction_handling: 'backup' }];
+test('deleting a branch removes its descendants and replay restores undo/redo exactly', () => {
+  const changes: StagedChange[] = [{ op: 'delete', head_id: 2 }];
   const removed = applyHeadChanges(original, changes);
   assert.equal(removed.some((head) => head.head_id === 2), false);
-  assert.equal(removed.find((head) => head.head_id === 4)?.parent_head_id, 1);
+  assert.equal(removed.some((head) => head.head_id === 4), false);
+  assert.deepEqual(removed.map((head) => head.head_id), [1, 3]);
   assert.equal(original[3].parent_head_id, 2);
   assert.deepEqual(applyHeadChanges(original, []), original);
   assert.deepEqual(applyHeadChanges(original, changes), removed);
-  assert.match(describeChanges(original, changes)[0], /backup.*Subheads move to Expenses/);
-  const rootRemoved = applyHeadChanges(original, [{ op: 'delete', head_id: 1, transaction_handling: 'hard_delete' }]);
-  assert.equal(rootRemoved.find((head) => head.head_id === 2)?.parent_head_id, null);
-  assert.equal(rootRemoved.find((head) => head.head_id === 4)?.parent_head_id, 2);
+  assert.match(describeChanges(original, changes)[0], /Delete Materials and all its subheads and transactions/);
+  const rootRemoved = applyHeadChanges(original, [{ op: 'delete', head_id: 1 }]);
+  assert.deepEqual(rootRemoved.map((head) => head.head_id), [3]);
 });
 
-test('deletion validates a policy and cannot leave later changes pointing to a missing head', () => {
-  assert.throws(() => applyHeadChanges(original, [{ op: 'delete', head_id: 999, transaction_handling: 'backup' }]), /no longer exists/);
+test('deletion rejects missing heads and later references to any deleted descendant', () => {
+  assert.throws(() => applyHeadChanges(original, [{ op: 'delete', head_id: 999 }]), /no longer exists/);
   assert.throws(() => applyHeadChanges(original, [
-    { op: 'delete', head_id: 2, transaction_handling: '' } as unknown as StagedChange,
-  ]), /Choose how/);
-  assert.throws(() => applyHeadChanges(original, [
-    { op: 'delete', head_id: 2, transaction_handling: 'hard_delete' },
+    { op: 'delete', head_id: 2 },
     { op: 'move', head_id: 3, new_parent_id: 2 },
   ]), /no longer exists/);
+  assert.throws(() => applyHeadChanges(original, [
+    { op: 'delete', head_id: 2 },
+    { op: 'create', temp_id: -1, head_name: 'New paint', parent_head_id: 4 },
+  ]), /no longer exists/);
+});
+
+test('a staged backup can preserve an inactive branch before deleting the original', () => {
+  const result = applyHeadChanges(original, [{ op: 'backup', head_id: 2 }, { op: 'delete', head_id: 2 }], true);
+  assert.equal(result.some((head) => head.head_id === 2 || head.head_id === 4), false);
+  const copies = result.filter((head) => head.head_id < 0);
+  assert.equal(copies.length, 2);
+  assert.ok(copies.every((head) => !head.is_active));
+  const copiedRoot = copies.find((head) => head.parent_head_id === null)!;
+  assert.match(copiedRoot.head_name, /Materials.*Backup/);
+  assert.equal(copies.find((head) => head !== copiedRoot)?.parent_head_id, copiedRoot.head_id);
+  assert.deepEqual(applyHeadChanges(original, []), original);
 });

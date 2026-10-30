@@ -62,20 +62,28 @@ export function AdminCreditFlow({ admin, creditUsers, heads, initialCreditUserId
   }
 
   async function save() {
+    if (busy) return;
     setError('');
     let profile;
     try { profile = validateProfile({ user_name: name, description, contacts }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Check the external user details.'); return; }
     setBusy(true);
+    let committed = false;
     try {
       if (screen === 'edit') await cashbookApi.editCreditUser(editingId, profile);
       else await cashbookApi.createCreditUser(profile);
-      await onRefresh();
-      if (screen === 'edit' && initialEditCreditUserId) { onClose(); return; }
+      committed = true;
+      // Leave the submitted form before refreshing: a failed read must not
+      // offer Save again for an external user that already exists.
       setNotice(screen === 'edit' ? 'External user updated successfully.' : 'External user created successfully.');
       const next = screen === 'edit' ? 'choose' : 'menu';
       resetForm(); setScreen(next);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save external user.'); }
+      await onRefresh();
+      if (screen === 'edit' && initialEditCreditUserId) onClose();
+    } catch (cause) {
+      setError(committed ? 'The external user was saved. Refresh to load the updated list. Please don’t save it again.'
+        : cause instanceof Error ? cause.message : 'Could not save external user.');
+    }
     finally { setBusy(false); }
   }
   return <section className="admin-credit-page flex-col gap-md">

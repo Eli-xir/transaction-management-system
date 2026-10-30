@@ -28,12 +28,20 @@ export default function App() {
     return () => { active = false; };
   }, [retry]);
   useEffect(() => {
+    function refreshRequired(event: Event) {
+      // A committed change must never look like an unsaved form that can be resubmitted.
+      setError((event as CustomEvent<string>).detail);
+    }
     function expired() {
       setSession(null); setData({ heads: [], users: [], creditUsers: [], permissions: {}, transactions: [] });
       navigate('/login', { replace: true });
     }
     window.addEventListener('cashbook:session-expired', expired);
-    return () => window.removeEventListener('cashbook:session-expired', expired);
+    window.addEventListener('cashbook:refresh-required', refreshRequired);
+    return () => {
+      window.removeEventListener('cashbook:session-expired', expired);
+      window.removeEventListener('cashbook:refresh-required', refreshRequired);
+    };
   }, [navigate]);
   const user = data.users.find((item) => item.user_id === session?.userId && item.is_active);
   const home = !user ? '/login' : session?.role === 'admin' ? '/Admin' : '/User';

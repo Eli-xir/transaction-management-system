@@ -10,9 +10,15 @@ test('legacy contact fields migrate and explicit empty contacts stay empty', () 
 
 test('multiple contacts are trimmed, empty rows removed, and duplicates rejected', () => {
   assert.deepEqual(validateProfile({ user_name: ' Ali ', contacts: [' 0300 ', '', '+92 311'] }), {
-    user_name: 'Ali', contacts: ['0300', '+92 311'],
+    user_name: 'Ali', contacts: ['0300', '+92 311'], description: '',
   });
   assert.throws(() => validateProfile({ user_name: 'Ali', contacts: ['0300', ' 0300 '] }), /once/);
   assert.throws(() => validateProfile({ user_name: ' ', contacts: [] }), /name/);
   assert.throws(() => validateProfile({ user_name: 'Ali', contacts: ['1'.repeat(25)] }), /24/);
+});
+
+test('profile descriptions are trimmed and preserved in the API input', () => {
+  assert.deepEqual(validateProfile({ user_name: ' Ali ', contacts: [], description: '  Tile fixer  ' }), {
+    user_name: 'Ali', contacts: [], description: 'Tile fixer',
+  });
 });

@@ -2,7 +2,11 @@
 
 Run `npm run dev` in this folder. Start the backend separately with `uvicorn main:app --reload` from its virtual environment. Vite proxies `/api` to localhost:8000, including cookie authentication, uploads and media downloads. No frontend environment file is needed for local development.
 
-The existing mobile card workflow and admin sidebar/ledger use real backend data. `src/data/cashbookApi.ts` is the shared API boundary; no browser local-storage database or mock authentication remains. Old prototype data in the browser is left untouched and is not imported automatically.
+The mobile card workflow and admin sidebar/ledger use real backend data.
+`src/data/cashbookApi.ts` connects the application to `cashbookClient.ts` (resource
+API mapping and coherent data assembly) and `apiRequest.ts` (transport, cookies,
+errors and read tokens). The frontend no longer calls `/api/state` or
+`/api/changes`. No browser local-storage database or mock authentication remains.
 
 See the [root setup guide](../README.md) for initial login and PostgreSQL startup, and the [API contract](../backend/README.md) for communication points.
 
@@ -16,4 +20,38 @@ No attachments or entry-ID column is included in reports. Normal users receive c
 
 For local phone use, browse to the computer's LAN address on Vite's port. Direct microphone recording requires HTTPS or localhost; on plain LAN HTTP the upload-audio option is available. Camera/gallery file selection uses the mobile file picker.
 
-The old mock API/storage tests were removed with that implementation. Existing pure tree/permissions/profile tests remain, but no tests or builds were run for this change at the user's request.
+## Regression checks
+
+`npm test` runs the adapter, transport, accounting/report, selection, upload,
+head-tree, permissions and profile tests. `npm run build` checks TypeScript and
+the production bundle. Reads load all bounded ledger pages, sharing a resource
+snapshot token; a changed snapshot discards the partial read. Writes are never
+automatically replayed. If a change saves but its follow-up refresh fails, the
+application shows a Reconnect screen that explicitly says the change was saved.
+
+`npm run test:e2e` runs Playwright against a real backend/PostgreSQL with desktop
+and mobile-width layouts. Install Chromium with `npx playwright install chromium`.
+The tests check API usage, balances, contracts, statement scope, filters,
+selection, edit trails, uploads, PDF previews/downloads and user submissions.
+
+Use a disposable backend for these tests; test fixtures create accounting data.
+For example, start a fresh PostgreSQL container without reusing an application
+volume:
+
+```powershell
+docker run --name cashbook-frontend-e2e -d -p 127.0.0.1:55440:5432 -e POSTGRES_USER=cashbook_test -e POSTGRES_PASSWORD=cashbook_test -e POSTGRES_DB=cashbook_e2e postgres:17
+```
+
+From `backend/`, in a separate terminal:
+
+```powershell
+$env:CASHBOOK_E2E_DATABASE_URL='postgresql://cashbook_test:cashbook_test@127.0.0.1:55440/cashbook_e2e'
+.\.venv\Scripts\python.exe e2e_server.py
+```
+
+This helper refuses a nonlocal or nonempty database, pins its network address,
+uses temporary local uploads and disables external storage. Start Vite on port
+5173, then run `npm run test:e2e` from this folder. Test login is `admin` with
+password `api-e2e-admin-password`. Stop the helper/Vite and remove only this
+temporary container afterward: `docker rm -f -v cashbook-frontend-e2e`.
+The CI workflow runs the same tests against a separate disposable database.

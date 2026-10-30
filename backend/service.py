@@ -65,13 +65,22 @@ def path(db, head_id):
     return ' / '.join(names)
 
 
-def ledger(db, user_id=None, credits_only=False):
-    where, params = '', []
+def ledger(db, user_id=None, credits_only=False, *, limit=None, offset=0, transaction_id=None):
+    conditions, params = [], []
     if user_id is not None:
-        where, params = 'WHERE t.user_id=%s', [user_id]
+        conditions.append('t.user_id=%s')
+        params.append(user_id)
     if credits_only:
-        where += ' AND t.created_by_user_id <> t.user_id AND t.is_active'
-    entries = db.execute(f'SELECT t.* FROM transactions t {where} ORDER BY t.created_at,t.transaction_id', params).fetchall()
+        conditions.append('t.created_by_user_id <> t.user_id AND t.is_active')
+    if transaction_id is not None:
+        conditions.append('t.transaction_id=%s')
+        params.append(transaction_id)
+    where = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
+    paging = ''
+    if limit is not None:
+        paging = ' LIMIT %s OFFSET %s'
+        params.extend((limit, offset))
+    entries = db.execute(f'SELECT t.* FROM transactions t {where} ORDER BY t.created_at,t.transaction_id{paging}', params).fetchall()
     ids = [row['transaction_id'] for row in entries]
     versions = db.execute('SELECT * FROM transaction_versions WHERE transaction_id=ANY(%s) ORDER BY version_id', (ids,)).fetchall()
     if credits_only:
@@ -207,13 +216,15 @@ def user_change(db, actor, change, session_id):
     return {'data': saved, 'user': next(u for u in saved['users'] if u['user_id'] == str(user['user_id']))} if creating else saved
 
 
-def credit_user_change(db, actor, change):
+def change_credit_user(db, actor, change):
+    """Mutate one external user; serialization/commit belong to the caller."""
     admin(actor)
+    user_id = change.creditUserId
     if change.action == 'create':
         require(change.profile, 'Enter the external user details.')
         profile = change.profile
-        db.execute('INSERT INTO credit_users(user_name,description,contacts) VALUES (%s,%s,%s)',
-                   (profile.user_name, profile.description, list(dict.fromkeys(profile.contacts))))
+        user_id = db.execute('INSERT INTO credit_users(user_name,description,contacts) VALUES (%s,%s,%s) RETURNING credit_user_id',
+                   (profile.user_name, profile.description, list(dict.fromkeys(profile.contacts)))).fetchone()['credit_user_id']
     else:
         user = db.execute('SELECT * FROM credit_users WHERE credit_user_id=%s FOR UPDATE', (change.creditUserId,)).fetchone()
         require(user, 'This external user no longer exists.', 404)
@@ -238,6 +249,11 @@ def credit_user_change(db, actor, change):
             require(not db.execute('SELECT 1 FROM contract_users WHERE credit_user_id=%s LIMIT 1', (change.creditUserId,)).fetchone(),
                     'This external user is linked to a contract. Unlink them first or deactivate them.')
             db.execute('DELETE FROM credit_users WHERE credit_user_id=%s', (change.creditUserId,))
+    return user_id
+
+
+def credit_user_change(db, actor, change):
+    change_credit_user(db, actor, change)
     return state(db, actor)
 
 
@@ -409,9 +425,10 @@ def head_changes(db, actor, change):
         elif item.op == 'edit':
             aid = None
             if item.image_url:
-                match = re.fullmatch(r'/api/attachments/(\d+)', item.image_url)
+                match = re.fullmatch(r'/api/attachments/([0-9]{1,10})', item.image_url)
                 require(match, 'Upload a head image first.')
                 aid = int(match.group(1))
+                require(0 < aid <= 2147483647, 'Choose a valid image attachment.')
                 require(db.execute('SELECT 1 FROM attachments WHERE attachment_id=%s AND attachment_type_id=1', (aid,)).fetchone(), 'Choose an image attachment.')
             db.execute('UPDATE heads SET head_name=%s,attachment_id=%s,is_transactionable=%s,head_description=COALESCE(%s,head_description) WHERE head_id=%s',
                        (item.head_name, aid, item.is_transactionable, item.head_description, source))
