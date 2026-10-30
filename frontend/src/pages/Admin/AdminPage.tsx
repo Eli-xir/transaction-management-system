@@ -46,6 +46,7 @@ const cards = [
   { id: 'statement', title: 'Users Statement', icon: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h2', tone: 'green' },
   { id: 'heads', title: 'Heads Management', icon: 'M3 6h6l2 2h10v12H3zM3 6V4h6l2 2M8 12h8M8 16h5', tone: 'purple' },
   { id: 'credit', title: 'Admin credit', icon: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5', tone: 'green' },
+  { id: 'user-credit', title: 'User credit', icon: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5', tone: 'green' },
   { id: 'debit', title: 'User debit', icon: 'M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5', tone: 'gold' },
 ] as const;
 type HeadMode = 'manage' | 'preview' | 'permissions';
@@ -214,7 +215,8 @@ export function AdminPage(props: AdminPageProps) {
           <Ledger key={`${revision}:${page}`} company={page === 'company'} filters={filters} onFilterChange={setFilters} revision={revision} heads={heads} users={users} onDirtyChange={setLedgerDirty}
             onChanged={props.onRefresh} /></>}
       {page === 'attachments' && <AttachmentsPage key={attachmentScope} initialScope={attachmentScope} users={users} creditUsers={props.creditUsers} heads={heads} />}
-      {page === 'debit' && <AdminDebitFlow key={`${revision}:${debitShortcut}`} initialUserId={debitShortcut} users={users} heads={heads}
+      {(page === 'debit' || page === 'user-credit') && <AdminDebitFlow key={`${page}:${revision}:${page === 'debit' ? debitShortcut : ''}`}
+        initialUserId={page === 'debit' ? debitShortcut : ''} users={users} heads={heads} permissions={permissions} mode={page === 'user-credit' ? 'credit' : 'debit'}
         onClose={() => setPage('home')} onSubmitted={props.onRefresh}
         onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} />}
       {(page === 'credit' || statementFrom === 'credit') && users.find((user) => user.user_id === currentAdminUserId) && <div hidden={page !== 'credit'}>

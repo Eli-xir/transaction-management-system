@@ -16,10 +16,11 @@ type Screen = 'home' | 'heads' | 'contracts' | 'images' | 'voice' | 'description
 const ignoreChange = (_value: boolean) => {};
 
 export function UserPreview({ user, heads, assigned, pending, onClose, preview = true, adminCredit = false, creditUser, transactionLabel = 'Credit', onSubmitted, onRefresh,
-  onDirtyChange = ignoreChange, onBusyChange = ignoreChange }: {
+  onDirtyChange = ignoreChange, onBusyChange = ignoreChange, adminBill = false }: {
   user: AdminUser; heads: Head[]; assigned: number[]; pending: boolean; onClose: () => void;
   preview?: boolean;
   adminCredit?: boolean;
+  adminBill?: boolean;
   creditUser?: CreditUser;
   transactionLabel?: string;
   onRefresh?: () => Promise<void>;
@@ -38,7 +39,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
   const linkedContracts = contractData.contracts.filter((contract) => contract.creditUserIds.includes(creditUser?.credit_user_id ?? ''));
   const selectedContract = linkedContracts.find((contract) => contract.id === contractId);
   const [screen, setScreen] = useState<Screen>('home');
-  const [amount, setAmount] = useState(preview && !adminCredit ? '1000' : '');
+  const adminEntry = adminCredit || adminBill;
+  const [amount, setAmount] = useState(preview && !adminEntry ? '1000' : '');
   const [search, setSearch] = useState('');
   const [description, setDescription] = useState('');
   const [path, setPath] = useState<number[]>([]);
@@ -49,7 +51,7 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
   const [success, setSuccess] = useState(false);
   const [reload, setReload] = useState(0);
   const [refreshing, setRefreshing] = useState(true);
-  const previewOnly = preview && !adminCredit;
+  const previewOnly = preview && !adminEntry;
   const visible = adminCredit ? heads.filter((head) => head.is_active) : permittedHeads(heads, assigned);
   const headId = path.at(-1);
   const selectedHead = visible.find((head) => head.head_id === headId);
@@ -101,7 +103,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
     setBusy(true); setError('');
     try {
       const input = { amount: Number(amount), description, headId: adminCredit ? null : headId!, attachments };
-      if (adminCredit) await cashbookApi.creditUser(user.user_id, input, creditUser?.credit_user_id, contractId || undefined);
+      if (adminBill) await cashbookApi.recordUserBill(user.user_id, input);
+      else if (adminCredit) await cashbookApi.creditUser(user.user_id, input, creditUser?.credit_user_id, contractId || undefined);
       else await cashbookApi.submitTransaction(user.user_id, input);
       setScreen('home'); setAmount(''); setDescription(''); setPath([]); setAttachments([]); setContractId(''); setSuccess(true);
       setReload((value) => value + 1);
@@ -115,7 +118,7 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
 
   return <div className="user-preview flex-col gap-md">
     <header className="preview-toolbar flex-row items-center justify-between gap-sm">
-      <span className="hint text-muted">{adminCredit ? `${transactionLabel} · ${creditUser?.user_name ?? user.user_name}` : preview ? `Preview · ${user.user_name}` : 'Cashbook'}</span>
+      <span className="hint text-muted">{adminEntry ? `${transactionLabel} · ${creditUser?.user_name ?? user.user_name}` : preview ? `Preview · ${user.user_name}` : 'Cashbook'}</span>
       <div className="flex-row items-center gap-sm">
       <button className="btn" disabled={locked || refreshing} onClick={async () => {
         setRefreshing(true);
@@ -126,9 +129,9 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
       </button>
       <button className="btn" disabled={locked}
         onClick={() => !preview && dirty ? setConfirmLogout(true) : onClose()}
-        aria-label={creditUser ? 'Back to external users' : adminCredit ? 'Close transaction workflow' : preview ? 'Close user preview' : 'Logout'}
-        title={creditUser ? 'Back to external users' : adminCredit ? 'Close transaction workflow' : preview ? 'Exit preview' : 'Logout'}>
-        {creditUser ? '← External users' : adminCredit ? 'Close' : preview ? 'Exit preview' : 'Logout'}
+        aria-label={creditUser ? 'Back to external users' : adminEntry ? 'Close transaction workflow' : preview ? 'Close user preview' : 'Logout'}
+        title={creditUser ? 'Back to external users' : adminEntry ? 'Close transaction workflow' : preview ? 'Exit preview' : 'Logout'}>
+        {creditUser ? '← External users' : adminEntry ? 'Close' : preview ? 'Exit preview' : 'Logout'}
       </button>
       </div>
     </header>
@@ -139,11 +142,11 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
     {!overview ? <>
       <p role="status">{error ? 'Balance unavailable.' : 'Loading balance…'}</p>
       {error && <button className="btn" disabled={refreshing} onClick={() => setReload((value) => value + 1)}>Retry</button>}
-    </> : <div className={adminCredit ? '' : `user-swipe${ledgerOpen ? ' user-swipe--ledger' : ''}`}
+    </> : <div className={adminEntry ? '' : `user-swipe${ledgerOpen ? ' user-swipe--ledger' : ''}`}
       onPointerDown={(event) => {
         swiped.current = false;
         swipeStart.current = null;
-        if (adminCredit || !event.isPrimary || event.pointerType === 'mouse' ||
+        if (adminEntry || !event.isPrimary || event.pointerType === 'mouse' ||
           (event.target as HTMLElement).closest('input, textarea, select, audio')) return;
         swipeStart.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
       }}
@@ -163,9 +166,9 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
       onClickCapture={(event) => {
         if (swiped.current) { event.preventDefault(); event.stopPropagation(); swiped.current = false; }
       }}>
-      <section inert={!adminCredit && ledgerOpen} aria-hidden={!adminCredit && ledgerOpen}
+      <section inert={!adminEntry && ledgerOpen} aria-hidden={!adminEntry && ledgerOpen}
         className="user-pane user-workspace flex-col gap-md" aria-label="User screen" aria-busy={locked}>
-      {!adminCredit && <div className="flex-row items-center justify-between gap-sm">
+      {!adminEntry && <div className="flex-row items-center justify-between gap-sm">
         <button className="btn" onClick={() => showLedger(true)}>← Your ledger</button>
         {screen === 'home' && <span className="hint text-muted">Swipe right</span>}
       </div>}
@@ -176,8 +179,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
       {screen === 'home' && <>
         {success && <p role="status">{creditUser ? 'Credit recorded successfully.' : 'Transaction sent successfully.'}</p>}
         <article className="user-card-panel home-card--gold balance-card flex-col gap-sm">
-          <h2>{creditUser ? `${creditUser.user_name} · Balance` : adminCredit ? user.role === 'admin' ? 'Company balance' : 'User’s total credits' : 'Remaining balance'}</h2>
-          <p className="balance-value"><span>{money(adminCredit && user.role !== 'admin' ? overview.totalReceived : overview.balance)}</span></p>
+          <h2>{creditUser ? `${creditUser.user_name} · Balance` : adminBill ? 'User’s total bills' : adminCredit ? user.role === 'admin' ? 'Company balance' : 'User’s total credits' : 'Remaining balance'}</h2>
+          <p className="balance-value"><span>{money(adminBill ? overview.totalBillPayment : adminCredit && user.role !== 'admin' ? overview.totalReceived : overview.balance)}</span></p>
         </article>
         <form className="flex-col gap-md" onSubmit={(event) => {
           event.preventDefault();
@@ -237,7 +240,7 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
       {screen === 'review' && <>
         <div className="user-card-panel flex-col gap-md">
           <dl className="review-details">
-            {adminCredit && <><dt>{creditUser ? 'Received from' : 'Recipient'}</dt><dd>{creditUser?.user_name ?? user.user_name}</dd></>}
+            {adminEntry && <><dt>{adminBill ? 'Recorded for' : creditUser ? 'Received from' : 'Recipient'}</dt><dd>{creditUser?.user_name ?? user.user_name}</dd></>}
             {creditUser && <><dt>Contract</dt><dd>{contractId ? selectedContract?.name ?? 'Contract unavailable' : 'Direct credit'}</dd></>}
             <dt>Amount</dt><dd>{money(Number(amount))}</dd>
             <dt>Description</dt><dd>{description || '—'}</dd>
@@ -252,10 +255,10 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
             <AttachmentInput kind={kind} items={attachments.filter((item) => item.kind === kind)} />
           </div>)}
         <button className="btn btn--primary user-next" disabled={previewOnly || locked || !valid || pending || !user.is_active}
-          onClick={submit}>{busy ? creditUser ? 'Recording…' : 'Sending…' : creditUser ? 'Record credit' : 'Send transaction'}</button>
+          onClick={submit}>{busy ? creditUser || adminBill ? 'Recording…' : 'Sending…' : adminBill ? 'Record user credit' : creditUser ? 'Record credit' : 'Send transaction'}</button>
       </>}
       </section>
-      {!adminCredit && <section inert={!ledgerOpen} aria-hidden={!ledgerOpen}
+      {!adminEntry && <section inert={!ledgerOpen} aria-hidden={!ledgerOpen}
         className="user-pane user-pane--ledger user-workspace flex-col gap-md" aria-label="Your credits ledger">
         <header className="flex-row items-center justify-between gap-sm">
           <h2>Your ledger</h2>

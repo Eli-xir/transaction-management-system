@@ -64,6 +64,7 @@ bodies cannot override it. Unknown body fields are rejected.
 | GET | `/transactions?userId=UUID&limit=100&offset=0` | Administrator ledger or regular user's current received credits |
 | GET | `/transactions/{id}` | One authorized transaction; regular users never receive edit history |
 | POST | `/transactions/bills` | Submit own bill: `{input}`; administrator preview cannot submit |
+| POST | `/users/{id}/bills` | Administrator records that active user's bill: `{input}`, using their assigned active transactionable heads |
 | POST | `/transactions/credits` | Administrator credit: `{userId, creditUserId?, contractId?, input}` |
 | PUT | `/transactions/{id}` | Edit: `{expectedVersion, input, contractId?}` |
 | PUT | `/transactions/{id}/status` | `{active, expectedVersion}` |
@@ -98,6 +99,15 @@ the revision attached to an existing head draft.
 attachments?:[{id,kind,name,url}]}`. Only attachment IDs are authoritative;
 display names, kinds and URLs supplied in this reference cannot replace stored
 metadata. Regular-user uploads must belong to that user and be unused.
+
+Home's User credit is an explicit admin bill-entry flow, separate from User debit
+(direct payments) and Admin credit (external receipts). It does not create or
+replace a user session. Bills retain the existing owner/creator accounting
+discriminator so balances, company cash statements and regular-user visibility
+remain consistent. Statements and transaction cards show the selected user as
+Entered by, using the existing `createdBy` field. The initial version retains
+the actual admin editor in the edit trail. Existing Home orders
+with 7, 9 or 10 cards remain accepted; new orders include all 11 cards.
 
 Head operations are `create`, `edit`, `move`, `merge`, `delete`, `backup`, and
 `active`, documented in OpenAPI. A single batch preserves temporary negative

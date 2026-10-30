@@ -36,6 +36,33 @@ def transaction_resource(identifier='12'):
 
 
 class ResourceApiTests(unittest.TestCase):
+    def test_admin_user_bill_route_keeps_url_identity_lock_audit_and_commit(self):
+        saved = {**transaction_resource(), 'createdBy': str(USER)}
+        with patch('resources.record_user_bill', return_value=saved) as record:
+            response = self.request('POST', f'/api/users/{USER}/bills', {'input': INPUT})
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(self.events, ['write-lock', 'authenticate', 'commit'])
+        record.assert_called_once()
+        self.assertEqual(record.call_args.args[:3], (self.db, self.actor, USER))
+        self.assertEqual(record.call_args.args[3].headId, 7)
+        self.assertEqual(response.json()['createdBy'], str(USER))
+
+    def test_regular_user_cannot_use_admin_bill_route_even_for_their_own_account(self):
+        self.actor = {'user_role_id': 2, 'user_id': USER}
+        response = self.request('POST', f'/api/users/{USER}/bills', {'input': INPUT})
+        self.assertEqual(response.status_code, 403)
+        self.db.commit.assert_not_called()
+
+    def test_admin_bill_route_cannot_override_identity_or_report_success_after_commit_failure(self):
+        response = self.request('POST', f'/api/users/{USER}/bills', {'input': INPUT, 'userId': str(ADMIN)})
+        self.assertEqual(response.status_code, 422)
+        self.db.commit.assert_not_called()
+        self.db.commit.side_effect = psycopg.OperationalError('private database error')
+        with patch('resources.record_user_bill', return_value=transaction_resource()), self.assertLogs('cashbook.api', level='ERROR'):
+            response = self.request('POST', f'/api/users/{USER}/bills', {'input': INPUT})
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('private database error', response.text)
+
     def setUp(self):
         self.actor = {'user_role_id': 1, 'user_id': ADMIN, 'home_order': HOME_ORDER}
         self.events = []

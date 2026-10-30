@@ -298,6 +298,24 @@ def revise(db, entry, editor_id, action, value=None, attachment_ids=None):
                (version_id, head_id, category_id, entry['is_active'], contract_id, entry['transaction_id']))
 
 
+def record_user_bill(db, actor, user_id, value):
+    """Administrator records a normal user's bill without impersonating a session.
+
+    Existing balances use created_by_user_id=user_id to identify bills. Preserve
+    that discriminator and the user-facing attribution; version.editor_id
+    retains the administrator's identity in the edit history.
+    """
+    admin(actor)
+    user = account(db, user_id, field=True)
+    require(user['is_active'], 'This account is deactivated.')
+    ids = validate_input(db, actor, value, user_id, submission=True)
+    entry = db.execute('''INSERT INTO transactions
+        (head_id,category_group_id,user_id,created_by_user_id,current_version_id)
+        VALUES (%s,NULL,%s,%s,0) RETURNING *''', (value.headId, user_id, user_id)).fetchone()
+    revise(db, entry, actor['user_id'], 'Recorded by admin', value, ids)
+    return ledger(db, user_id, transaction_id=entry['transaction_id'])[0]
+
+
 def transaction_change(db, actor, change):
     submitting = change.action == 'submit'
     if submitting:
@@ -483,7 +501,7 @@ def apply_change(db, actor, change, session_id):
     if change.op == 'homeOrder':
         base_cards = {'attachments', 'users', 'company', 'statement', 'heads', 'credit', 'debit'}
         # Accept old clients during deployment; the frontend appends newly available cards.
-        require(len(set(change.ids)) == len(change.ids) and set(change.ids) in (base_cards, base_cards | {'receivable', 'payable'}, base_cards | {'receivable', 'payable', 'contracts'}),
+        require(len(set(change.ids)) == len(change.ids) and set(change.ids) in (base_cards, base_cards | {'receivable', 'payable'}, base_cards | {'receivable', 'payable', 'contracts'}, base_cards | {'receivable', 'payable', 'contracts', 'user-credit'}),
                 'Include each Home card once.')
         db.execute('UPDATE users SET home_order=%s WHERE user_id=%s', (change.ids, actor['user_id']))
         return {'homeOrder': change.ids}

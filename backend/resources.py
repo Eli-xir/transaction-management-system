@@ -22,7 +22,7 @@ from resource_models import (
 from queries import external_users, one, permission_rules, users
 from responses import (UserResource, ExternalUserResource, ContractResource, TransactionResource,
                        TransactionPage, SubmissionResource)
-from service import admin, change_credit_user, heads, ledger, overview, require, state
+from service import admin, change_credit_user, heads, ledger, overview, require, state, record_user_bill
 
 router = APIRouter(prefix='/api')
 
@@ -234,6 +234,14 @@ def submit_bill(value: CreateTransaction, request: Request, db: DB, actor: Write
 @router.post('/transactions/credits', status_code=201, response_model=TransactionResource, tags=['Transactions'])
 def create_credit(value: CreateCredit, request: Request, db: DB, actor: Writer):
     return execute(db, actor, TransactionChange(op='transaction', action='credit', **value.model_dump()), request)
+
+
+@router.post('/users/{user_id}/bills', status_code=201, response_model=TransactionResource, tags=['Transactions'])
+def record_bill_for_user(user_id: UUID, value: CreateTransaction, db: DB, actor: Writer):
+    """Admin-only bill entry for an active normal user, using their assigned heads."""
+    result = record_user_bill(db, actor, user_id, value.input)
+    db.commit()
+    return result
 
 
 @router.put('/transactions/{transaction_id}', response_model=TransactionResource, tags=['Transactions'])

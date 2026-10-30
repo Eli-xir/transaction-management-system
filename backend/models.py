@@ -157,7 +157,7 @@ class ContractChange(Model):
 
 class HomeOrderChange(Model):
     op: Literal['homeOrder']
-    ids: list[Literal['attachments', 'users', 'company', 'statement', 'heads', 'credit', 'debit', 'receivable', 'payable', 'contracts']] = Field(min_length=7, max_length=10)
+    ids: list[Literal['attachments', 'users', 'company', 'statement', 'heads', 'credit', 'debit', 'receivable', 'payable', 'contracts', 'user-credit']] = Field(min_length=7, max_length=11)
 
 
 Change = Annotated[HeadsChange | PermissionsChange | UserChange | CreditUserChange | TransactionChange | HomeOrderChange | ContractChange, Field(discriminator='op')]

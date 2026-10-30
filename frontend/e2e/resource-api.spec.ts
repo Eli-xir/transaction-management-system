@@ -193,7 +193,7 @@ test('login errors stay friendly and a valid login loads every home card', async
   await expect(page.getByRole('alert')).toHaveText('Incorrect username or password.');
   await page.getByLabel('Password', { exact: true }).fill(adminPassword);
   await page.getByRole('button', { name: 'Login', exact: true }).click();
-  await expect(page.locator('[data-home-card]')).toHaveCount(10);
+  await expect(page.locator('[data-home-card]')).toHaveCount(11);
   await expect(page.locator('[data-home-card="receivable"]')).toContainText('PKR');
   expect(uiRequests).toContain('GET /api/users');
   expect(uiRequests).toContain('GET /api/contracts');
@@ -375,7 +375,7 @@ test('attachments retain head-wise default, selection, preview and PDF downloads
 
 test('Home card arrangement saves through preferences and survives reload', async ({ page }) => {
   await page.goto('/Admin');
-  await expect(page.locator('[data-home-card]')).toHaveCount(10);
+  await expect(page.locator('[data-home-card]')).toHaveCount(11);
   await page.getByRole('button', { name: 'Rearrange', exact: true }).click();
   await page.locator('[data-home-card="contracts"]').getByRole('button').click();
   await page.locator('[data-home-card="payable"]').getByRole('button').click();
@@ -384,7 +384,7 @@ test('Home card arrangement saves through preferences and survives reload', asyn
   expect((await save).status()).toBe(200);
   const order = await page.locator('[data-home-card]').evaluateAll((items) => items.map((item) => item.getAttribute('data-home-card')));
   await page.reload();
-  await expect(page.locator('[data-home-card]')).toHaveCount(10);
+  await expect(page.locator('[data-home-card]')).toHaveCount(11);
   expect(await page.locator('[data-home-card]').evaluateAll((items) => items.map((item) => item.getAttribute('data-home-card')))).toEqual(order);
 });
 
@@ -411,7 +411,7 @@ test('a saved user survives a failed refresh and reconnect never submits the cre
   await expect(page.getByRole('button', { name: 'Reconnect', exact: true })).toBeVisible();
   await page.unroute('**/api/users');
   await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
-  await expect(page.locator('[data-home-card]')).toHaveCount(10);
+  await expect(page.locator('[data-home-card]')).toHaveCount(11);
   expect(uiRequests.filter((request) => request === 'POST /api/users')).toHaveLength(1);
   const users = await call(api, 'GET', '/users');
   expect(users.filter((user: FixtureUser) => user.user_name === name)).toHaveLength(1);
@@ -442,4 +442,91 @@ test('a saved external user leaves the create form before a failed refresh and c
   await page.getByRole('searchbox', { name: 'Search external users', exact: true }).fill(name);
   await expect(accountCard(page, name)).toBeVisible();
   expect(uiRequests.filter((request) => request === 'POST /api/external-users')).toHaveLength(1);
+});
+
+test('Home User credit records a bill on behalf of a user while User debit remains a direct payment', async ({ page }) => {
+  const session = await call(api, 'GET', '/session');
+  const administrator = await call(api, 'GET', `/users/${session.userId}`);
+  const target = await call(api, 'POST', '/users', { profile: {
+    user_name: `Credit target ${Date.now()}`, contacts: [],
+  }, password: userPassword }, 201);
+  const inactive = await call(api, 'POST', '/users', { profile: {
+    user_name: `Inactive target ${Date.now()}`, contacts: [],
+  }, password: userPassword }, 201);
+  await call(api, 'PUT', `/users/${inactive.user_id}/status`, { active: false });
+  const tree = await call(api, 'GET', '/heads');
+  const root = tree.heads.find((head: { head_name: string }) => head.head_name === rootHead);
+  const leaf = tree.heads.find((head: { head_name: string }) => head.head_name === leafHead);
+  await call(api, 'PUT', `/users/${target.user_id}/permissions`, { ids: [root.head_id] });
+
+  await home(page, 'debit');
+  await page.getByRole('searchbox', { name: 'Search users', exact: true }).fill(target.user_name);
+  await accountCard(page, target.user_name).locator('button.home-card-main').click();
+  await page.getByLabel('Enter amount in PKR', { exact: true }).fill('200');
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Images', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  const paymentDescription = `Payment for ${target.user_name}`;
+  await page.getByLabel('Description (optional)', { exact: true }).fill(paymentDescription);
+  await page.getByRole('button', { name: 'Review transaction', exact: true }).click();
+  const paid = page.waitForResponse((response) => response.url().endsWith('/api/transactions/credits') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Send transaction', exact: true }).click();
+  const payment = await (await paid).json();
+  expect(payment.headId).toBeNull();
+  expect(payment.createdBy).toBe(session.userId);
+  await expect(page.locator('[data-home-card="user-credit"]')).toBeVisible();
+
+  await home(page, 'user-credit');
+  await expect(page.getByRole('heading', { name: 'User credit', exact: true })).toBeVisible();
+  await expect(accountCard(page, inactive.user_name)).toHaveCount(0);
+  await expect(accountCard(page, administrator.user_name)).toHaveCount(0);
+  await page.getByRole('searchbox', { name: 'Search users', exact: true }).fill(target.user_name);
+  await accountCard(page, target.user_name).locator('button.home-card-main').click();
+  await expect(page.getByRole('heading', { name: 'User’s total bills', exact: true })).toBeVisible();
+  await page.getByLabel('Enter amount in PKR', { exact: true }).fill('125');
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.getByRole('button', { name: forbiddenHead, exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close transaction workflow', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Discard this transaction draft?', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await page.getByRole('button', { name: rootHead, exact: true }).click();
+  await page.getByRole('button', { name: leafHead, exact: true }).click();
+  await page.getByRole('button', { name: 'Make a new transaction', exact: true }).click();
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'admin-user-credit.png', mimeType: 'image/png', buffer: png });
+  await expect(page.getByAltText('admin-user-credit.png')).toBeVisible();
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  const billDescription = `Bill for ${target.user_name}`;
+  await page.getByLabel('Description (optional)', { exact: true }).fill(billDescription);
+  await page.getByRole('button', { name: 'Review transaction', exact: true }).click();
+  await expect(page.getByText(target.user_name, { exact: true }).filter({ visible: true })).toBeVisible();
+  const posted = page.waitForResponse((response) => response.url().endsWith(`/api/users/${target.user_id}/bills`) && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Record user credit', exact: true }).click();
+  const recorded = await posted;
+  expect(recorded.status()).toBe(201);
+  const bill = await recorded.json();
+  expect(bill.headId).toBe(leaf.head_id);
+  expect(bill.createdBy).toBe(target.user_id);
+  expect(bill.attachments).toHaveLength(1);
+  expect(bill.versions[0].editorId).toBe(session.userId);
+  expect(bill.versions[0].action).toBe('Recorded by admin');
+  await expect(page.locator('[data-home-card="user-credit"]')).toBeVisible();
+  expect(await call(api, 'GET', '/session')).toEqual(session);
+  expect(uiRequests.filter((item) => item === 'POST /api/session')).toEqual([]);
+  expect(await call(api, 'GET', `/users/${target.user_id}/overview`)).toMatchObject({
+    totalReceived: 200, totalBillPayment: 125, balance: 75,
+  });
+
+  await home(page, 'receivable');
+  await accountCard(page, target.user_name).getByRole('button', { name: 'View statement', exact: true }).click();
+  const row = page.locator('tr.ledger-entry').filter({ hasText: billDescription });
+  await expect(row.locator('td').nth(2)).toHaveText(target.user_name);
+  await row.click();
+  await expect(page.getByRole('dialog').getByText(/Recorded by admin · PKR 125/)).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await home(page, 'company');
+  await page.getByLabel('Rows per page').selectOption('100');
+  await expect(page.locator('tr.ledger-entry').filter({ hasText: billDescription })).toHaveCount(0);
+  await expect(page.locator('tr.ledger-entry').filter({ hasText: paymentDescription })).toBeVisible();
 });

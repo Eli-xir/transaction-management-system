@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accountTotals, ledgerReport } from '../src/pages/Ledger/ledgerModel.ts';
+import { accountTotals, direction, historyOf, isCompanyTransaction, ledgerReport } from '../src/pages/Ledger/ledgerModel.ts';
 import type { FiltersState, Head, Transaction } from '../src/pages/Admin/types.ts';
 
 const filters: FiltersState = { dateFrom: '', dateTo: '', userScope: 'all', direction: 'both' };
@@ -14,6 +14,17 @@ const entries: Transaction[] = [
   { id: '3', userId: 'user', createdBy: 'user', headId: 2, amount: 50, active: true, createdAt: '2026-09-03T12:00:00Z', attachments: [] },
   { id: '4', userId: 'user', createdBy: 'admin', headId: null, amount: 9000, active: false, createdAt: '2026-09-03T12:00:00Z', attachments: [] },
 ];
+
+test('a bill recorded on behalf of a user retains user-facing attribution and the original balances', () => {
+  const bill = { ...entries[2], versions: [{ ...entries[2], versionId: '3-v1', recordedAt: entries[2].createdAt,
+    editorId: 'admin', action: 'Recorded by admin' }] };
+  assert.equal(direction(bill), 'debit');
+  assert.equal(isCompanyTransaction(bill), false);
+  assert.deepEqual(accountTotals([entries[1], bill]), { totalReceived: 200, totalBillPayment: 50, remainingPayable: -150 });
+  assert.equal(historyOf(bill)[0].editorId, 'admin');
+  assert.equal(bill.createdBy, bill.userId);
+  assert.equal(ledgerReport([entries[1], bill], filters, 'by-time', heads, true).rows.length, 1);
+});
 
 test('All heads includes headless receipts/payments, even when the head tree is empty', () => {
   for (const headId of [undefined, null]) for (const tree of [heads, []]) {

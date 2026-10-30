@@ -172,12 +172,40 @@ class DatabaseApiTests(unittest.TestCase):
         self.assertEqual((normal_state['transactions'], normal_state['creditUsers'], normal_state['contracts']), ([], [], []))
         self.assertEqual([u['user_id'] for u in normal_state['users']], [worker_id])
 
+        # Admin User credit records the user's bill with the admin's audit identity.
+        bill_input = {'input': {'amount': '125', 'headId': head_id, 'description': 'Recorded for absent worker'}}
+        self.call(self.admin, 'POST', '/api/transactions/bills', bill_input, 403)
+        self.call(self.user, 'POST', f'/api/users/{worker_id}/bills', bill_input, 403)
+        self.call(self.admin, 'POST', f'/api/users/{admin_id}/bills', bill_input, 400)
+        self.call(self.admin, 'POST', f'/api/users/{worker_id}/bills', {'input': {'amount': '125', 'headId': None}}, 400)
+        self.call(self.admin, 'POST', f'/api/users/{worker_id}/bills', {'input': {'amount': '125', 'headId': root_id}}, 400)
+        unassigned = self.call(self.admin, 'POST', '/api/users', {
+            'profile': {'user_name': 'Unassigned worker'}, 'password': USER_PASSWORD}, 201)
+        self.call(self.admin, 'POST', f"/api/users/{unassigned['user_id']}/bills", bill_input, 403)
+        admin_bill = self.call(self.admin, 'POST', f'/api/users/{worker_id}/bills', bill_input, 201)
+        self.assertEqual(admin_bill['createdBy'], worker_id)
+        self.assertEqual(admin_bill['headId'], head_id)
+        self.assertEqual(admin_bill['versions'][0]['editorId'], admin_id)
+        self.assertEqual(admin_bill['versions'][0]['action'], 'Recorded by admin')
+        self.assertEqual(self.call(self.admin, 'GET', '/api/session')['userId'], admin_id)
+        updated = self.call(self.admin, 'GET', f'/api/users/{worker_id}/overview')
+        self.assertEqual((updated['totalReceived'], updated['totalBillPayment'], updated['balance']), (600, 375, 225))
+        self.call(self.user, 'GET', f"/api/transactions/{admin_bill['id']}", expected=404)
+        self.assertNotIn(admin_bill['id'], [t['id'] for t in self.call(self.user, 'GET', '/api/transactions')['items']])
+        edited_bill = self.call(self.admin, 'PUT', f"/api/transactions/{admin_bill['id']}", {
+            'expectedVersion': int(admin_bill['versions'][-1]['versionId']),
+            'input': {'amount': '150', 'headId': head_id, 'description': 'Corrected bill'}})
+        self.assertEqual(edited_bill['headId'], head_id)
+        self.assertEqual(edited_bill['createdBy'], worker_id)
+        self.assertEqual(self.call(self.admin, 'GET', f'/api/users/{worker_id}/overview')['totalBillPayment'], 400)
+
         self.call(self.admin, 'PUT', f'/api/users/{worker_id}/password', {'password': 'replacement-password'}, 204)
         self.call(self.user, 'GET', '/api/state', expected=401)
         self.assertIsNone(self.call(self.user, 'GET', '/api/session'))
         self.call(self.user, 'POST', '/api/session', {'username': profile['user_name'], 'password': USER_PASSWORD}, 401)
         self.call(self.user, 'POST', '/api/session', {'username': profile['user_name'], 'password': 'replacement-password'})
         self.call(self.admin, 'PUT', f'/api/users/{worker_id}/status', {'active': False})
+        self.call(self.admin, 'POST', f'/api/users/{worker_id}/bills', bill_input, 400)
         self.call(self.user, 'GET', '/api/state', expected=401)
         self.call(self.admin, 'DELETE', '/api/session')
         self.assertIsNone(self.call(self.admin, 'GET', '/api/session'))

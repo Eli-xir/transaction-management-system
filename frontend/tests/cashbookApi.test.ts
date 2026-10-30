@@ -370,6 +370,21 @@ test('bill submission sends only transaction input; server determines the signed
   assert.equal(writes(calls).length, 1);
 });
 
+test('admin User credit records a bill for the selected user without changing the signed-in session', async () => {
+  const bill = { ...transaction, createdBy: workerId };
+  const { api, calls } = harness({ respond: (call) => call.path === `/users/${workerId}/bills` ? bill : undefined });
+  assert.deepEqual(await api.recordUserBill(workerId, input), bill);
+  assertWrite(writes(calls)[0], 'POST', `/users/${workerId}/bills`, { input });
+  assert.equal(calls.length, 1, 'Do not log into or impersonate the selected user');
+});
+
+test('failed admin bill entries are not automatically replayed', async () => {
+  const failure = new ApiError('This head is not assigned to the user.', 403);
+  const { api, calls } = harness({ fail: (call) => call.path.endsWith('/bills') ? failure : undefined });
+  await assert.rejects(api.recordUserBill(workerId, input), failure);
+  assert.equal(writes(calls).length, 1);
+});
+
 test('normal-user credit preserves its recipient and transaction input', async () => {
   const { api, calls } = harness();
   assert.deepEqual(await api.creditUser(workerId, input), transaction);

@@ -1,11 +1,12 @@
 import { useCallback, useState } from 'react';
-import type { AdminUser, Head } from '../types';
+import type { AdminUser, Head, Permissions } from '../types';
 import { UserCards } from './UserCards';
 import { Dialog } from './Dialog';
 import { UserPreview } from './UserPreview';
 
-export function AdminDebitFlow({ users, heads, onClose, onSubmitted, onDirtyChange, onBusyChange, initialUserId = '', returnToSource = false }: {
+export function AdminDebitFlow({ users, heads, onClose, onSubmitted, onDirtyChange, onBusyChange, initialUserId = '', returnToSource = false, mode = 'debit', permissions = {} }: {
   users: AdminUser[]; heads: Head[]; initialUserId?: string;
+  mode?: 'debit' | 'credit'; permissions?: Permissions;
   returnToSource?: boolean;
   onClose: () => void; onSubmitted: () => Promise<void>;
   onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
@@ -20,10 +21,11 @@ export function AdminDebitFlow({ users, heads, onClose, onSubmitted, onDirtyChan
   function leaveUser() { if (returnToSource) onClose(); else setUserId(''); }
   function back() { if (!busy) { if (dirty) setDiscard(true); else leaveUser(); } }
   return <section className="admin-credit-page flex-col gap-md">
-    {user ? <UserPreview key={userId} user={user} heads={heads} assigned={[]} pending={false} adminCredit transactionLabel="User debit"
+    {user ? <UserPreview key={userId} user={user} heads={heads} assigned={permissions[userId] ?? []} pending={false}
+      adminCredit={mode === 'debit'} adminBill={mode === 'credit'} transactionLabel={mode === 'credit' ? 'User credit' : 'User debit'}
       onClose={back} onDirtyChange={changeDirty} onBusyChange={changeBusy}
       onSubmitted={async () => { await onSubmitted(); onClose(); }} /> : <>
-      <header className="flex-row items-center gap-sm"><h1>User debit</h1></header>
+      <header className="flex-row items-center gap-sm"><h1>{mode === 'credit' ? 'User credit' : 'User debit'}</h1></header>
       <UserCards users={users} onOpen={(item) => setUserId(item.user_id)} onChanged={onSubmitted} />
     </>}
     {discard && <Dialog title="Discard this transaction draft?" onClose={() => setDiscard(false)}>
