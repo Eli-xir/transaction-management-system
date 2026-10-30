@@ -44,7 +44,7 @@ class TransactionValues(BaseModel):
     amount: float
     headId: int | None
     description: str
-    transactionTypeId: Literal[1]
+    transactionTypeId: Literal[1, 2, 3]
     active: bool
     headPath: str
     contractId: str | None

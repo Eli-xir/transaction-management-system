@@ -7,6 +7,7 @@ import { cashbookApi } from '../../data/cashbookApi';
 import { ReceiptContractPicker } from '../Admin/components/ReceiptContractPicker';
 import { direction, headPath, historyOf, money } from './ledgerModel';
 import './Ledger.css';
+import { adminPayableLabel } from '../Admin/utils/adminPayable';
 
 export function TransactionCard({ entry, admin = false, company = false, heads = [], users = [], creditUsers = [], contracts = [], transactions = [], initialUserId = '', onClose, onChanged }: {
   transactions?: Transaction[];
@@ -56,6 +57,7 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
     finally { setBusy(false); }
   }
   return <Dialog title={current ? `${direction(current, company) === 'credit' ? 'Credit' : 'Debit'} · ${money(current.amount)}` : 'Credit a user'} onClose={onClose} busy={locked}>
+    {current && adminPayableLabel(current) && <p role="status">{adminPayableLabel(current)}</p>}
     {current?.contractId && <p>Contract: <strong>{contracts.find((contract) => contract.id === current.contractId)?.name ?? current.contractId}</strong></p>}
     {editing && admin ? <form className="flex-col gap-md" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <fieldset className="field flex-col gap-md" disabled={locked}>

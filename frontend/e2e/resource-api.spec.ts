@@ -193,7 +193,7 @@ test('login errors stay friendly and a valid login loads every home card', async
   await expect(page.getByRole('alert')).toHaveText('Incorrect username or password.');
   await page.getByLabel('Password', { exact: true }).fill(adminPassword);
   await page.getByRole('button', { name: 'Login', exact: true }).click();
-  await expect(page.locator('[data-home-card]')).toHaveCount(11);
+  await expect(page.locator('[data-home-card]')).toHaveCount(12);
   await expect(page.locator('[data-home-card="receivable"]')).toContainText('PKR');
   expect(uiRequests).toContain('GET /api/users');
   expect(uiRequests).toContain('GET /api/contracts');
@@ -375,7 +375,7 @@ test('attachments retain head-wise default, selection, preview and PDF downloads
 
 test('Home card arrangement saves through preferences and survives reload', async ({ page }) => {
   await page.goto('/Admin');
-  await expect(page.locator('[data-home-card]')).toHaveCount(11);
+  await expect(page.locator('[data-home-card]')).toHaveCount(12);
   await page.getByRole('button', { name: 'Rearrange', exact: true }).click();
   await page.locator('[data-home-card="contracts"]').getByRole('button').click();
   await page.locator('[data-home-card="payable"]').getByRole('button').click();
@@ -384,7 +384,7 @@ test('Home card arrangement saves through preferences and survives reload', asyn
   expect((await save).status()).toBe(200);
   const order = await page.locator('[data-home-card]').evaluateAll((items) => items.map((item) => item.getAttribute('data-home-card')));
   await page.reload();
-  await expect(page.locator('[data-home-card]')).toHaveCount(11);
+  await expect(page.locator('[data-home-card]')).toHaveCount(12);
   expect(await page.locator('[data-home-card]').evaluateAll((items) => items.map((item) => item.getAttribute('data-home-card')))).toEqual(order);
 });
 
@@ -411,7 +411,7 @@ test('a saved user survives a failed refresh and reconnect never submits the cre
   await expect(page.getByRole('button', { name: 'Reconnect', exact: true })).toBeVisible();
   await page.unroute('**/api/users');
   await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
-  await expect(page.locator('[data-home-card]')).toHaveCount(11);
+  await expect(page.locator('[data-home-card]')).toHaveCount(12);
   expect(uiRequests.filter((request) => request === 'POST /api/users')).toHaveLength(1);
   const users = await call(api, 'GET', '/users');
   expect(users.filter((user: FixtureUser) => user.user_name === name)).toHaveLength(1);
@@ -529,4 +529,75 @@ test('Home User credit records a bill on behalf of a user while User debit remai
   await page.getByLabel('Rows per page').selectOption('100');
   await expect(page.locator('tr.ledger-entry').filter({ hasText: billDescription })).toHaveCount(0);
   await expect(page.locator('tr.ledger-entry').filter({ hasText: paymentDescription })).toBeVisible();
+});
+
+test('Admin payable is separate, direct, toggleable, and payable from its cards and User debit', async ({ page }) => {
+  const target = await call(api, 'POST', '/users', { profile: {
+    user_name: `Personal ${Date.now()}`, contacts: [],
+  }, password: userPassword }, 201);
+  const session = await call(api, 'GET', '/session');
+  const companyBefore = await call(api, 'GET', `/users/${session.userId}/overview`);
+  const url = `/api/users/${target.user_id}/admin-payable`;
+  async function finish(amount: string, description: string, action: string, image = false) {
+    await page.getByLabel('Enter amount in PKR', { exact: true }).fill(amount);
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Images', exact: true })).toBeVisible();
+    if (image) {
+      await page.locator('input[type="file"]').first().setInputFiles({ name: 'personal.png', mimeType: 'image/png', buffer: png });
+      await expect(page.getByAltText('personal.png')).toBeVisible();
+      await page.getByRole('button', { name: 'Next', exact: true }).click();
+    } else await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    await page.getByLabel('Description (optional)', { exact: true }).fill(description);
+    await page.getByRole('button', { name: 'Review transaction', exact: true }).click();
+    await expect(page.locator('.review-details')).not.toContainText('Head');
+    const saved = page.waitForResponse((response) => response.url().endsWith(action === 'Add Admin payable' ? url : url+'/payments') && response.request().method() === 'POST');
+    await page.getByRole('button', { name: action, exact: true }).click();
+    const response = await saved;
+    expect(response.status()).toBe(201);
+    return response.json();
+  }
+  await home(page, 'admin-payable');
+  await page.getByRole('button', { name: 'Add Admin payable', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Search users', exact: true }).fill(target.user_name);
+  await accountCard(page, target.user_name).locator('button.home-card-main').click();
+  const description = `Personal obligation ${target.user_name}`;
+  const added = await finish('1000', description, 'Add Admin payable', true);
+  expect(added.transactionTypeId).toBe(2);
+  expect(added.headId).toBeNull();
+  await expect(accountCard(page, target.user_name)).toContainText('PKR 1,000');
+  expect((await call(api, 'GET', `/users/${session.userId}/overview`)).balance).toBe(companyBefore.balance);
+  await accountCard(page, target.user_name).getByRole('button', { name: 'Pay Admin payable', exact: true }).click();
+  await page.getByLabel('Enter amount in PKR', { exact: true }).fill('1001');
+  await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
+  const paymentNote = `Personal payment ${target.user_name}`;
+  const payment = await finish('400', paymentNote, 'Record Admin payable payment');
+  expect(payment.transactionTypeId).toBe(3);
+  await expect(accountCard(page, target.user_name)).toContainText('PKR 600');
+  expect((await call(api, 'GET', `/users/${session.userId}/overview`)).balance).toBe(companyBefore.balance-400);
+  await accountCard(page, target.user_name).getByRole('button', { name: 'View statement', exact: true }).click();
+  await expect(page.locator('tr.ledger-entry')).toHaveCount(2);
+  await expect(page.locator('tr.ledger-entry').filter({ hasText: description })).toContainText('Admin payable added');
+  await expect(page.locator('tr.ledger-entry').filter({ hasText: paymentNote })).toContainText('Admin payable paid');
+  const toggle = page.getByRole('button', { name: 'Show Admin payable', exact: true });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await expect(page.locator('tr.ledger-entry')).toHaveCount(0);
+  await toggle.click();
+  await expect(page.locator('tr.ledger-entry')).toHaveCount(2);
+  await toggle.click(); // Leaving this off must not hide actual cash payments in Company Statement.
+  await home(page, 'company');
+  await page.getByLabel('Rows per page').selectOption('100');
+  await expect(page.locator('tr.ledger-entry').filter({ hasText: description })).toHaveCount(0);
+  await expect(page.locator('tr.ledger-entry').filter({ hasText: paymentNote })).toHaveCount(1);
+  await home(page, 'payable');
+  await expect(accountCard(page, target.user_name)).toHaveCount(0);
+  await home(page, 'debit');
+  await page.getByRole('button', { name: 'Pay Admin payable', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Search users', exact: true }).fill(target.user_name);
+  await accountCard(page, target.user_name).locator('button.home-card-main').click();
+  await finish('600', `Personal final ${target.user_name}`, 'Record Admin payable payment');
+  await expect(page.locator('[data-home-card="admin-payable"]')).toBeVisible();
+  await home(page, 'admin-payable');
+  await expect(accountCard(page, target.user_name)).toHaveCount(0);
 });

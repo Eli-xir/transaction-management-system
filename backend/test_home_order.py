@@ -11,7 +11,8 @@ class HomeOrderTests(unittest.TestCase):
 
     def test_old_and_new_clients_can_save_their_order(self):
         for ids in [self.base, ['payable', 'receivable'] + self.base, ['contracts', 'payable', 'receivable'] + self.base,
-                    ['user-credit', 'contracts', 'payable', 'receivable'] + self.base]:
+                    ['user-credit', 'contracts', 'payable', 'receivable'] + self.base,
+                    ['admin-payable', 'user-credit', 'contracts', 'payable', 'receivable'] + self.base]:
             db = Mock()
             result = apply_change(db, self.actor, HomeOrderChange(op='homeOrder', ids=ids), 'session')
             self.assertEqual(result['homeOrder'], ids)

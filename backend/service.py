@@ -123,7 +123,7 @@ def overview(db, user_id):
             COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id=t.user_id),0) AS credits,
             COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id<>t.user_id),0) AS debits
             FROM transactions t JOIN transaction_versions v ON v.version_id=t.current_version_id
-            WHERE t.is_active''').fetchone()
+            WHERE t.is_active AND v.transaction_type_id<>2''').fetchone()
         credits, debits = float(amounts['credits']), float(amounts['debits'])
         return {'balance': credits-debits, 'totalReceived': credits, 'totalBillPayment': debits,
                 'remainingPayable': debits-credits, 'credits': []}
@@ -257,8 +257,9 @@ def credit_user_change(db, actor, change):
     return state(db, actor)
 
 
-def validate_input(db, actor, value, user_id, submission=False, direct=False):
+def validate_input(db, actor, value, user_id, submission=False, direct=False, allow_personal=False):
     require(value, 'Enter the transaction details.')
+    require(allow_personal or value.transactionTypeId == 1, 'Use the Admin payable workflow for this entry.')
     if direct:
         # Older clients may still send a head; admin payments are always direct.
         value.headId = None
@@ -347,6 +348,10 @@ def transaction_change(db, actor, change):
         entry = db.execute('SELECT * FROM transactions WHERE transaction_id=%s FOR UPDATE', (change.id,)).fetchone()
         require(entry, 'This transaction no longer exists.', 404)
         require(entry['current_version_id'] == change.expectedVersion, 'This entry changed. Close and reopen the card before editing.', 409)
+        current_type = db.execute('SELECT transaction_type_id FROM transaction_versions WHERE version_id=%s', (entry['current_version_id'],)).fetchone().get('transaction_type_id', 1)
+        if current_type in (2, 3):
+            from personal_payable import change as change_personal
+            return change_personal(db, actor, entry, change)
         assigning_contract = change.action == 'edit' and change.contractId is not None and not entry.get('contract_id')
         if change.action == 'edit' and change.contractId is not None:
             require(entry.get('credit_user_id'), 'Contracts only apply to receipts from external users.')
@@ -501,7 +506,7 @@ def apply_change(db, actor, change, session_id):
     if change.op == 'homeOrder':
         base_cards = {'attachments', 'users', 'company', 'statement', 'heads', 'credit', 'debit'}
         # Accept old clients during deployment; the frontend appends newly available cards.
-        require(len(set(change.ids)) == len(change.ids) and set(change.ids) in (base_cards, base_cards | {'receivable', 'payable'}, base_cards | {'receivable', 'payable', 'contracts'}, base_cards | {'receivable', 'payable', 'contracts', 'user-credit'}),
+        require(len(set(change.ids)) == len(change.ids) and set(change.ids) in (base_cards, base_cards | {'receivable', 'payable'}, base_cards | {'receivable', 'payable', 'contracts'}, base_cards | {'receivable', 'payable', 'contracts', 'user-credit'}, base_cards | {'receivable', 'payable', 'contracts', 'user-credit', 'admin-payable'}),
                 'Include each Home card once.')
         db.execute('UPDATE users SET home_order=%s WHERE user_id=%s', (change.ids, actor['user_id']))
         return {'homeOrder': change.ids}

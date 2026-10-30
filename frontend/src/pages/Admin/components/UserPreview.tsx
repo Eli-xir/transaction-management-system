@@ -11,16 +11,18 @@ import { TransactionCard } from '../../Ledger/TransactionCard';
 import { creditDocument } from '../../Ledger/ledgerExport';
 import { ReportActions } from '../../Ledger/ReportActions';
 import { creditUserScope, ledgerReport, money } from '../../Ledger/ledgerModel';
+import { adminPayableBalance } from '../utils/adminPayable';
 
 type Screen = 'home' | 'heads' | 'contracts' | 'images' | 'voice' | 'description' | 'review';
 const ignoreChange = (_value: boolean) => {};
 
 export function UserPreview({ user, heads, assigned, pending, onClose, preview = true, adminCredit = false, creditUser, transactionLabel = 'Credit', onSubmitted, onRefresh,
-  onDirtyChange = ignoreChange, onBusyChange = ignoreChange, adminBill = false }: {
+  onDirtyChange = ignoreChange, onBusyChange = ignoreChange, adminBill = false, adminPayable }: {
   user: AdminUser; heads: Head[]; assigned: number[]; pending: boolean; onClose: () => void;
   preview?: boolean;
   adminCredit?: boolean;
   adminBill?: boolean;
+  adminPayable?: 'add' | 'pay';
   creditUser?: CreditUser;
   transactionLabel?: string;
   onRefresh?: () => Promise<void>;
@@ -39,7 +41,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
   const linkedContracts = contractData.contracts.filter((contract) => contract.creditUserIds.includes(creditUser?.credit_user_id ?? ''));
   const selectedContract = linkedContracts.find((contract) => contract.id === contractId);
   const [screen, setScreen] = useState<Screen>('home');
-  const adminEntry = adminCredit || adminBill;
+  const adminEntry = adminCredit || adminBill || !!adminPayable;
+  const directEntry = adminCredit || !!adminPayable;
   const [amount, setAmount] = useState(preview && !adminEntry ? '1000' : '');
   const [search, setSearch] = useState('');
   const [description, setDescription] = useState('');
@@ -61,7 +64,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
     : head.parent_head_id === headId).sort((a, b) => a.head_name.localeCompare(b.head_name));
   const amountValid = amount.trim() !== '' && Number.isSafeInteger(Number(amount)) && Number(amount) > 0 && Number(amount) <= 999999999999;
   const validContract = !contractId || !!selectedContract?.isActive && Number(amount) <= contractBalance(selectedContract, contractData.transactions).remaining;
-  const valid = amountValid && validContract && (adminCredit || !!selectedHead?.is_transactionable);
+  const validPersonal = adminPayable !== 'pay' || Number(amount) <= (overview?.balance ?? 0);
+  const valid = amountValid && validContract && validPersonal && (directEntry || !!selectedHead?.is_transactionable);
   const dirty = !previewOnly && (amount !== '' || description !== '' || attachments.length > 0 || screen !== 'home');
   const locked = busy || attachmentBusy;
   const title = screen === 'heads'
@@ -77,7 +81,10 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
   useEffect(() => {
     let ignore = false;
     setRefreshing(true);
-    const request = creditUser ? cashbookApi.ledger().then(({ transactions, contracts = [] }) => {
+    const request = adminPayable ? cashbookApi.ledger().then(({ transactions }) => {
+      const balance = adminPayableBalance(transactions, user.user_id);
+      return { balance, totalReceived: 0, totalBillPayment: balance, remainingPayable: balance, credits: [] };
+    }) : creditUser ? cashbookApi.ledger().then(({ transactions, contracts = [] }) => {
       if (!ignore) setContractData({ transactions, contracts });
       const report = ledgerReport(transactions, { dateFrom: '', dateTo: '', direction: 'both',
         userScope: creditUserScope(creditUser.credit_user_id) }, 'by-time', [], true);
@@ -89,21 +96,23 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
     }).catch((error) => { if (!ignore) setError(error instanceof Error ? error.message : 'Could not load your balance.'); })
       .finally(() => { if (!ignore) setRefreshing(false); });
     return () => { ignore = true; };
-  }, [user.user_id, creditUser?.credit_user_id, reload]);
+  }, [user.user_id, creditUser?.credit_user_id, reload, adminPayable]);
 
   function go(next: Screen) { setSearch(''); setError(''); setScreen(next); }
   function back() {
     if (locked) return;
     if (screen === 'heads' && path.length) { setPath((current) => current.slice(0, -1)); setSearch(''); setError(''); }
     else go(screen === 'heads' || screen === 'contracts' ? 'home'
-      : screen === 'images' ? adminCredit ? creditUser && linkedContracts.length ? 'contracts' : 'home' : 'heads' : screen === 'voice' ? 'images' : screen === 'description' ? 'voice' : 'description');
+      : screen === 'images' ? directEntry ? creditUser && linkedContracts.length ? 'contracts' : 'home' : 'heads' : screen === 'voice' ? 'images' : screen === 'description' ? 'voice' : 'description');
   }
   async function submit() {
     if (previewOnly || !valid || pending || !user.is_active || locked) return;
     setBusy(true); setError('');
     try {
-      const input = { amount: Number(amount), description, headId: adminCredit ? null : headId!, attachments };
-      if (adminBill) await cashbookApi.recordUserBill(user.user_id, input);
+      const input = { amount: Number(amount), description, headId: directEntry ? null : headId!, attachments };
+      if (adminPayable === 'add') await cashbookApi.addAdminPayable(user.user_id, input);
+      else if (adminPayable === 'pay') await cashbookApi.payAdminPayable(user.user_id, input);
+      else if (adminBill) await cashbookApi.recordUserBill(user.user_id, input);
       else if (adminCredit) await cashbookApi.creditUser(user.user_id, input, creditUser?.credit_user_id, contractId || undefined);
       else await cashbookApi.submitTransaction(user.user_id, input);
       setScreen('home'); setAmount(''); setDescription(''); setPath([]); setAttachments([]); setContractId(''); setSuccess(true);
@@ -179,19 +188,20 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
       {screen === 'home' && <>
         {success && <p role="status">{creditUser ? 'Credit recorded successfully.' : 'Transaction sent successfully.'}</p>}
         <article className="user-card-panel home-card--gold balance-card flex-col gap-sm">
-          <h2>{creditUser ? `${creditUser.user_name} · Balance` : adminBill ? 'User’s total bills' : adminCredit ? user.role === 'admin' ? 'Company balance' : 'User’s total credits' : 'Remaining balance'}</h2>
+          <h2>{adminPayable ? 'Admin payable remaining' : creditUser ? `${creditUser.user_name} · Balance` : adminBill ? 'User’s total bills' : adminCredit ? user.role === 'admin' ? 'Company balance' : 'User’s total credits' : 'Remaining balance'}</h2>
           <p className="balance-value"><span>{money(adminBill ? overview.totalBillPayment : adminCredit && user.role !== 'admin' ? overview.totalReceived : overview.balance)}</span></p>
         </article>
         <form className="flex-col gap-md" onSubmit={(event) => {
           event.preventDefault();
-          if (amountValid && user.is_active) { setSuccess(false); go(adminCredit ? creditUser && linkedContracts.length ? 'contracts' : 'images' : 'heads'); }
+          if (amountValid && validPersonal && user.is_active) { setSuccess(false); go(directEntry ? creditUser && linkedContracts.length ? 'contracts' : 'images' : 'heads'); }
         }}>
           <label className="user-card-panel home-card--blue field amount-card">
             <span>Enter amount (PKR)</span>
             <input type="text" inputMode="numeric" pattern="[0-9]+" maxLength={12} required value={amount}
               onChange={(event) => { if (/^\d*$/.test(event.target.value)) setAmount(event.target.value); }} placeholder="0" aria-label="Enter amount in PKR" />
           </label>
-          <button className="btn btn--primary user-next" disabled={!amountValid || !user.is_active}>Next</button>
+          {!validPersonal && <p role="alert">The payment exceeds the remaining Admin payable amount.</p>}
+          <button className="btn btn--primary user-next" disabled={!amountValid || !validPersonal || !user.is_active}>Next</button>
         </form>
       </>}
       {screen === 'contracts' && creditUser && <>
@@ -244,7 +254,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
             {creditUser && <><dt>Contract</dt><dd>{contractId ? selectedContract?.name ?? 'Contract unavailable' : 'Direct credit'}</dd></>}
             <dt>Amount</dt><dd>{money(Number(amount))}</dd>
             <dt>Description</dt><dd>{description || '—'}</dd>
-            {!adminCredit && <><dt>Head</dt><dd>{selectedHead?.head_name ?? 'Head no longer available'}</dd></>}
+            {!directEntry && <><dt>Head</dt><dd>{selectedHead?.head_name ?? 'Head no longer available'}</dd></>}
+            {adminPayable && <><dt>Entry type</dt><dd>{adminPayable === 'add' ? 'Admin payable added' : 'Admin payable paid'}</dd></>}
           </dl>
           {!valid && <p role="alert">{adminCredit ? 'Go back and check the amount.' : 'Go back and check the amount and head.'}</p>}
           {!validContract && <p role="alert">Go back and choose an active contract with enough remaining balance, or skip for a direct credit.</p>}
@@ -255,7 +266,7 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
             <AttachmentInput kind={kind} items={attachments.filter((item) => item.kind === kind)} />
           </div>)}
         <button className="btn btn--primary user-next" disabled={previewOnly || locked || !valid || pending || !user.is_active}
-          onClick={submit}>{busy ? creditUser || adminBill ? 'Recording…' : 'Sending…' : adminBill ? 'Record user credit' : creditUser ? 'Record credit' : 'Send transaction'}</button>
+          onClick={submit}>{busy ? 'Recording…' : adminPayable === 'add' ? 'Add Admin payable' : adminPayable === 'pay' ? 'Record Admin payable payment' : adminBill ? 'Record user credit' : creditUser ? 'Record credit' : 'Send transaction'}</button>
       </>}
       </section>
       {!adminEntry && <section inert={!ledgerOpen} aria-hidden={!ledgerOpen}

@@ -8,7 +8,7 @@ export interface OutstandingUser { user: AdminUser; category: BalanceCategory; a
 export function outstandingBalances(users: AdminUser[], transactions: Transaction[]): OutstandingUser[] {
   const balances = new Map<string, number>();
   for (const entry of transactions) {
-    if (!entry.active || entry.creditUserId) continue;
+    if (!entry.active || entry.creditUserId || entry.transactionTypeId === 2 || entry.transactionTypeId === 3) continue;
     const signed = entry.createdBy === entry.userId ? -entry.amount : entry.amount;
     balances.set(entry.userId, roundMoney((balances.get(entry.userId) ?? 0) + signed));
   }

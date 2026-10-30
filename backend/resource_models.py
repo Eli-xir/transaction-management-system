@@ -62,4 +62,4 @@ class HeadBatch(Model):
 
 
 class HomeOrder(Model):
-    ids: HomeOrderChange.model_fields['ids'].annotation = Field(min_length=7, max_length=11)
+    ids: HomeOrderChange.model_fields['ids'].annotation = Field(min_length=7, max_length=12)

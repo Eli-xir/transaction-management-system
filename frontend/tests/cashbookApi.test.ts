@@ -391,6 +391,15 @@ test('normal-user credit preserves its recipient and transaction input', async (
   assertWrite(writes(calls)[0], 'POST', '/transactions/credits', { userId: workerId, input });
 });
 
+for (const [method, suffix] of [['addAdminPayable', ''], ['payAdminPayable', '/payments']] as const) {
+  test(`${method} uses the dedicated personal obligation endpoint without replaying writes`, async () => {
+    const { api, calls } = harness();
+    await api[method](workerId, { ...input, headId: null });
+    assertWrite(writes(calls)[0], 'POST', `/users/${workerId}/admin-payable${suffix}`, { input: { ...input, headId: null } });
+    assert.equal(writes(calls).length, 1);
+  });
+}
+
 test('external contract receipt retains payer, contract and administrator recipient', async () => {
   const { api, calls } = harness();
   await api.creditUser(adminId, input, payerId, contractId);

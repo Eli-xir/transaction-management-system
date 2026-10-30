@@ -7,6 +7,7 @@ import { dateRangeLabel, invalidDateRange, direction, headBranchIds, headPath, i
 import type { LedgerOrder } from './ledgerModel';
 import { ReportActions } from './ReportActions';
 import { AttachmentExport } from './AttachmentExport';
+import { adminPayableLabel } from '../Admin/utils/adminPayable';
 import type { ReportDocument } from './ledgerExport';
 import { TransactionCard } from './TransactionCard';
 import './Ledger.css';
@@ -21,6 +22,7 @@ type LedgerData = Awaited<ReturnType<typeof cashbookApi.ledger>>;
 const filterKey = (filters: FiltersState) => JSON.stringify([
   filters.dateFrom, filters.dateTo, filters.userScope, filters.direction, filters.headId ?? null, filters.description ?? '', filters.timeFrom ?? '', filters.timeTo ?? '',
   filters.contractId ?? null,
+  filters.showAdminPayable !== false,
 ]);
 export function Ledger({ filters: suppliedFilters, revision, heads, users, onDirtyChange, onFilterChange, company = false, onChanged, attachmentReview, contract, contractUserId }: {
   contract?: Contract; contractUserId?: string;
@@ -105,11 +107,11 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const dateLabel = dateRangeLabel(filters);
   const contractName = (id?: string | null) => !id || id === '__none__' ? 'No contract' : data?.contracts?.find((item) => item.id === id)?.name ?? contract?.name ?? 'Unavailable contract';
   const contractOptions = (data?.contracts ?? []).filter((item) => !filters.userScope.startsWith('credit:') || item.creditUserIds.includes(filters.userScope.slice(7)) || transactions.some((entry) => entry.contractId === item.id && matchesUserScope(entry, filters.userScope)));
-  const subtitle = [branchLabel, filters.contractId ? `Contract: ${contractName(filters.contractId)}` : '', dateLabel, company && filters.userScope !== 'all' ? userName(filters.userScope) : '', filters.description ? `Description: ${filters.description}` : ''].filter(Boolean).join(' · ');
+  const subtitle = [branchLabel, !company && filters.showAdminPayable === false ? 'Admin payable excluded' : '', filters.contractId ? `Contract: ${contractName(filters.contractId)}` : '', dateLabel, company && filters.userScope !== 'all' ? userName(filters.userScope) : '', filters.description ? `Description: ${filters.description}` : ''].filter(Boolean).join(' · ');
   const columns = ['Date/time', 'User', 'Entered by', contractColumn ? 'Contract' : 'Head', 'Description', 'Credit', 'Debit', 'Balance'];
   const entryCells = (entry: Transaction, balance: number): (string | number)[] => [
     new Date(entry.createdAt).toLocaleString(), entryUserName(entry), userName(entry.createdBy),
-    contractColumn ? contractName(entry.contractId) : entry.headPath ?? headPath(data?.heads ?? [], entry.headId), [!contractColumn && entry.contractId ? `Contract: ${data?.contracts?.find((item) => item.id === entry.contractId)?.name ?? entry.contractId}` : '', entry.description ?? ''].filter(Boolean).join(' · '),
+    contractColumn ? contractName(entry.contractId) : entry.headPath ?? headPath(data?.heads ?? [], entry.headId), [adminPayableLabel(entry), !contractColumn && entry.contractId ? `Contract: ${data?.contracts?.find((item) => item.id === entry.contractId)?.name ?? entry.contractId}` : '', entry.description ?? ''].filter(Boolean).join(' · '),
     entryDirection(entry) === 'credit' ? entry.amount : '', entryDirection(entry) === 'debit' ? entry.amount : '', balance,
   ];
   const totalCells = (label: string, balance: number, credit: number | string = '', debit: number | string = ''): (string | number)[] => [label, '', '', '', '', credit, debit, balance];
@@ -146,6 +148,12 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
     {!attachmentReview && <h1>{title}</h1>}
     {(subtitle || !attachmentReview && filters.userScope !== 'all') && <div className="active-filters flex-row flex-wrap gap-sm"><span>{[subtitle, !company && filters.userScope !== 'all' ? userName(filters.userScope) : ''].filter(Boolean).join(' · ')}</span></div>}
     <div className="ledger-toolbar flex-row flex-wrap gap-sm">
+      {!company && <button className="btn" aria-pressed={filters.showAdminPayable !== false} onClick={() => {
+        const showAdminPayable = filters.showAdminPayable === false;
+        const next = { ...filters, showAdminPayable };
+        setDraft({ scope: filterKey(next), filters: { ...draftFilters, showAdminPayable } });
+        onFilterChange(next);
+      }}>Show Admin payable</button>}
       {!selectionActive && <button className="btn" disabled={!data || invalidDates || !report.rows.length} onClick={() => setSelection({ scope, active: true, ids: new Set(), anchor: null, range: false })}>Select entries</button>}
       <label className="field"><span>Entries</span><select value={draftFilters.direction} onChange={(event) => stageFilters({ ...draftFilters, direction: event.target.value as FiltersState['direction'] })}><option value="both">Credits & debits</option><option value="credit">Credits</option><option value="debit">Debits</option></select></label>
       <label className="field"><span>Arrangement</span><select value={order} onChange={(event) => { setOrder(event.target.value as LedgerOrder); setPage(0); }}>
@@ -197,7 +205,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
         <button className="btn" disabled={currentPage + 1 === pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
       </div>
       {!attachmentReview && <details className="disclosure" open={showInactive} onToggle={(event) => setShowInactive(event.currentTarget.open)}><summary>Deactivated entries</summary>
-        {transactions.filter((entry) => !entry.active && matchesContractScope(entry, filters.contractId) && matchesUserScope(entry, filters.userScope) && (!branch || (entry.headId !== null && branch.has(entry.headId)))).map((entry) =>
+        {transactions.filter((entry) => !entry.active && (company || filters.showAdminPayable !== false || !adminPayableLabel(entry)) && matchesContractScope(entry, filters.contractId) && matchesUserScope(entry, filters.userScope) && (!branch || (entry.headId !== null && branch.has(entry.headId)))).map((entry) =>
           <button className="btn" key={entry.id} onClick={() => setSelected(entry)}>{new Date(entry.createdAt).toLocaleString()} · {entryUserName(entry)} · {money(entry.amount)}</button>)}
       </details>}
     </>}

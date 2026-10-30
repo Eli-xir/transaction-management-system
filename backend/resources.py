@@ -244,6 +244,22 @@ def record_bill_for_user(user_id: UUID, value: CreateTransaction, db: DB, actor:
     return result
 
 
+@router.post('/users/{user_id}/admin-payable', status_code=201, response_model=TransactionResource, tags=['Admin payable'])
+def add_admin_payable(user_id: UUID, value: CreateTransaction, db: DB, actor: Writer):
+    from personal_payable import record
+    result = record(db, actor, user_id, value.input)
+    db.commit()
+    return result
+
+
+@router.post('/users/{user_id}/admin-payable/payments', status_code=201, response_model=TransactionResource, tags=['Admin payable'])
+def pay_admin_payable(user_id: UUID, value: CreateTransaction, db: DB, actor: Writer):
+    from personal_payable import record
+    result = record(db, actor, user_id, value.input, payment=True)
+    db.commit()
+    return result
+
+
 @router.put('/transactions/{transaction_id}', response_model=TransactionResource, tags=['Transactions'])
 def edit_transaction(transaction_id: RecordId, value: EditTransaction, request: Request, db: DB, actor: Writer):
     return execute(db, actor, TransactionChange(op='transaction', action='edit', id=transaction_id, **value.model_dump()), request)

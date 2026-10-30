@@ -129,6 +129,8 @@ export function createCashbookApi(request: ApiRequest, onSavedRefreshFailure?: (
     userOverview: (userId: string) => request<UserOverview>(`/users/${idPath(userId)}/overview`),
     submitTransaction: (_userId: string, input: TransactionInput) => write<{ id: string; applied: boolean }>('/transactions/bills', 'POST', { input }),
     recordUserBill: (userId: string, input: TransactionInput) => write<Transaction>(`/users/${idPath(userId)}/bills`, 'POST', { input }),
+    addAdminPayable: (userId: string, input: TransactionInput) => write<Transaction>(`/users/${idPath(userId)}/admin-payable`, 'POST', { input }),
+    payAdminPayable: (userId: string, input: TransactionInput) => write<Transaction>(`/users/${idPath(userId)}/admin-payable/payments`, 'POST', { input }),
     creditUser: (userId: string, input: TransactionInput, creditUserId?: string, contractId?: string) =>
       write<Transaction>('/transactions/credits', 'POST', { userId, creditUserId, contractId, input }),
     editTransaction: (id: string, input: TransactionInput, expectedVersion: string, contractId?: string) =>

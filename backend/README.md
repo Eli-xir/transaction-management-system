@@ -65,6 +65,8 @@ bodies cannot override it. Unknown body fields are rejected.
 | GET | `/transactions/{id}` | One authorized transaction; regular users never receive edit history |
 | POST | `/transactions/bills` | Submit own bill: `{input}`; administrator preview cannot submit |
 | POST | `/users/{id}/bills` | Administrator records that active user's bill: `{input}`, using their assigned active transactionable heads |
+| POST | `/users/{id}/admin-payable` | Administrator adds a personal amount owed to a normal user: `{input}`; direct, no head |
+| POST | `/users/{id}/admin-payable/payments` | Administrator pays part or all of that personal obligation: `{input}`; cannot exceed remaining amount |
 | POST | `/transactions/credits` | Administrator credit: `{userId, creditUserId?, contractId?, input}` |
 | PUT | `/transactions/{id}` | Edit: `{expectedVersion, input, contractId?}` |
 | PUT | `/transactions/{id}/status` | `{active, expectedVersion}` |
@@ -107,7 +109,18 @@ discriminator so balances, company cash statements and regular-user visibility
 remain consistent. Statements and transaction cards show the selected user as
 Entered by, using the existing `createdBy` field. The initial version retains
 the actual admin editor in the edit trail. Existing Home orders
-with 7, 9 or 10 cards remain accepted; new orders include all 11 cards.
+with 7, 9, 10 or 11 cards remain accepted; new orders include all 12 cards.
+
+Admin payable uses transaction types 2 (added) and 3 (paid), registered by migration
+011. Normal entries retain type 1. Obligations are direct, ledger-only entries;
+payments appear once as company cash outflow. Both affect the normal user's
+statement and can be hidden together with its Show Admin payable toggle,
+including opening balances, totals and exports. They are excluded from the
+ordinary Receivable/Payable cards. The Admin payable card tracks only the personal
+remaining balance. Writes use the common ledger lock, so simultaneous payments
+cannot exceed it. Editing, deleting, deactivating or reactivating entries cannot
+leave personal payments greater than personal obligations. Generic transaction
+creation cannot forge these transaction types.
 
 Head operations are `create`, `edit`, `move`, `merge`, `delete`, `backup`, and
 `active`, documented in OpenAPI. A single batch preserves temporary negative

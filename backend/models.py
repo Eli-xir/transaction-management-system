@@ -46,7 +46,7 @@ class TransactionInput(Model):
     amount: Decimal = Field(ge=0, le=999999999999.99, max_digits=18, decimal_places=2, allow_inf_nan=False)
     headId: RecordId | None = None
     description: str = Field(default="", max_length=4000)
-    transactionTypeId: Literal[1] = 1
+    transactionTypeId: Literal[1, 2, 3] = 1
     attachments: list[AttachmentRef] = Field(default_factory=list, max_length=1000)
 
 
@@ -157,7 +157,7 @@ class ContractChange(Model):
 
 class HomeOrderChange(Model):
     op: Literal['homeOrder']
-    ids: list[Literal['attachments', 'users', 'company', 'statement', 'heads', 'credit', 'debit', 'receivable', 'payable', 'contracts', 'user-credit']] = Field(min_length=7, max_length=11)
+    ids: list[Literal['attachments', 'users', 'company', 'statement', 'heads', 'credit', 'debit', 'receivable', 'payable', 'contracts', 'user-credit', 'admin-payable']] = Field(min_length=7, max_length=12)
 
 
 Change = Annotated[HeadsChange | PermissionsChange | UserChange | CreditUserChange | TransactionChange | HomeOrderChange | ContractChange, Field(discriminator='op')]

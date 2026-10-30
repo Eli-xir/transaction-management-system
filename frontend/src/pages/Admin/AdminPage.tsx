@@ -7,6 +7,8 @@ import { UserPreview } from './components/UserPreview';
 import { UserPicker } from './components/UserPicker';
 import { Dialog } from './components/Dialog';
 import { AdminDebitFlow } from './components/AdminDebitFlow';
+import { AdminPayablePage } from './components/AdminPayablePage';
+import { adminPayableBalance } from './utils/adminPayable';
 import { AdminCreditFlow } from './components/AdminCreditFlow';
 import { UserCards } from './components/UserCards';
 import { matchesUser } from './utils/userProfile';
@@ -37,6 +39,7 @@ interface AdminPageProps extends CashbookData {
   onUserAction?: (userId: string, action: UserAction) => Promise<void>;
 }
 const cards = [
+  { id: 'admin-payable', title: 'Admin payable', icon: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h4', tone: 'gold' },
   { id: 'contracts', title: 'Contracts', icon: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h4', tone: 'blue' },
   { id: 'receivable', title: 'Receivable', icon: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5', tone: 'green' },
   { id: 'payable', title: 'Payable', icon: 'M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5', tone: 'gold' },
@@ -95,6 +98,7 @@ export function AdminPage(props: AdminPageProps) {
   const outstanding = outstandingBalances(selectableUsers, props.transactions);
   const contractOutstanding = contracts.map((contract) => contractBalance(contract, props.transactions).remaining).filter((amount) => amount > 0);
   const homeCards = cards.map((card) => {
+    if (card.id === 'admin-payable') return { ...card, amount: money(selectableUsers.reduce((sum, user) => sum + adminPayableBalance(props.transactions, user.user_id), 0)) };
     if (card.id === 'contracts') return { ...card, amount: money(contractOutstanding.reduce((sum, amount) => roundMoney(sum + amount), 0)), detail: `${contractOutstanding.length} outstanding contracts` };
     if (card.id !== 'receivable' && card.id !== 'payable') return card;
     const accounts = outstanding.filter((entry) => entry.category === card.id);
@@ -163,6 +167,8 @@ export function AdminPage(props: AdminPageProps) {
       </section>}
     </section>
     <div className="admin-content">
+      {page === 'admin-payable' && <AdminPayablePage users={users} heads={heads} transactions={props.transactions}
+        onBack={() => navigate(() => setPage('home'))} onStatement={(id) => navigate(() => { setStatementFrom('admin-payable'); setFilters({ dateFrom: '', dateTo: '', userScope: id, direction: 'both', showAdminPayable: true }); setPage('statement'); })} onRefresh={props.onRefresh} onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} />}
       {(['receivable', 'payable'] as const).map((category) => <div key={category} hidden={page !== category || (category === 'payable' && !!payUserId)}>
         <OutstandingPage category={category} entries={outstanding} contracts={contracts} transactions={props.transactions} onContract={(id) => openContract(id, 'receivable')} onBack={() => navigate(() => setPage('home'))} onPay={setPayUserId}
           onStatement={(userScope) => navigate(() => {
@@ -211,12 +217,12 @@ export function AdminPage(props: AdminPageProps) {
       {preview && selectedUser ? <section className="admin-preview"><UserPreview key={`${selectedUserId}:${revision}`} user={selectedUser} onRefresh={props.onRefresh} heads={heads} assigned={editor.ids(selectedUserId)} pending={diff.granted.length + diff.revoked.length > 0}
         onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} onClose={closeHeadView} /></section>
         : (page === 'company' || page === 'statement') && <>
-          {statementFrom && <button className="btn" onClick={() => navigate(() => setPage(statementFrom))}>← Back{statementFrom === 'receivable' ? ' to Receivable' : statementFrom === 'payable' ? ' to Payable' : ''}</button>}
+          {statementFrom && <button className="btn" onClick={() => navigate(() => setPage(statementFrom))}>← Back{statementFrom === 'receivable' ? ' to Receivable' : statementFrom === 'payable' ? ' to Payable' : statementFrom === 'admin-payable' ? ' to Admin payable' : ''}</button>}
           <Ledger key={`${revision}:${page}`} company={page === 'company'} filters={filters} onFilterChange={setFilters} revision={revision} heads={heads} users={users} onDirtyChange={setLedgerDirty}
             onChanged={props.onRefresh} /></>}
       {page === 'attachments' && <AttachmentsPage key={attachmentScope} initialScope={attachmentScope} users={users} creditUsers={props.creditUsers} heads={heads} />}
       {(page === 'debit' || page === 'user-credit') && <AdminDebitFlow key={`${page}:${revision}:${page === 'debit' ? debitShortcut : ''}`}
-        initialUserId={page === 'debit' ? debitShortcut : ''} users={users} heads={heads} permissions={permissions} mode={page === 'user-credit' ? 'credit' : 'debit'}
+        initialUserId={page === 'debit' ? debitShortcut : ''} users={users} heads={heads} transactions={props.transactions} permissions={permissions} mode={page === 'user-credit' ? 'credit' : 'debit'}
         onClose={() => setPage('home')} onSubmitted={props.onRefresh}
         onDirtyChange={setTransactionDirty} onBusyChange={setTransactionBusy} />}
       {(page === 'credit' || statementFrom === 'credit') && users.find((user) => user.user_id === currentAdminUserId) && <div hidden={page !== 'credit'}>

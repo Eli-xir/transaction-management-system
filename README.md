@@ -48,6 +48,8 @@ Start PostgreSQL and the two applications using the commands above. The API stay
 
 ## Behavior
 
+- Home's Admin payable card tracks personal amounts the administrator owes normal users. Additions use amount, images, voice and description without heads and never change company cash totals. Payments reduce the personal balance and appear once in Company Statement. Pay Admin payable is available from User debit and each outstanding personal account. User statements label these entries and include a Show Admin payable toggle that also controls report totals and exports.
+
 - Sohail is the administrator. Users cannot modify profiles, contacts, passwords, heads or permissions. Admin manages all of those, including multiple contacts per user.
 - Users see the balance/amount cards, then category, heads, optional images, optional voice, review and submit. Swipe right for their credits ledger. Their own bill entries never appear in their history or media downloads.
 - Admin preview lets the admin explore the user's workflow without submitting transactions. Home's User credit card lets the admin explicitly record a bill for an active user, through that user's assigned heads and the usual evidence/review steps. User debit remains the direct payment flow; Admin credit handles external receipts and contracts. No user login or password is needed for User credit. Entered by shows the selected user; the edit trail retains the administrator who recorded it.

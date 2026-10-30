@@ -199,6 +199,44 @@ class DatabaseApiTests(unittest.TestCase):
         self.assertEqual(edited_bill['createdBy'], worker_id)
         self.assertEqual(self.call(self.admin, 'GET', f'/api/users/{worker_id}/overview')['totalBillPayment'], 400)
 
+        # Personal liabilities affect the user's ledger, but only their payments move company cash.
+        personal_url = f'/api/users/{worker_id}/admin-payable'
+        before_company = self.call(self.admin, 'GET', f'/api/users/{admin_id}/overview')['balance']
+        personal_input = {'input': {'amount': '1000', 'headId': None, 'description': 'Personal obligation'}}
+        self.call(self.user, 'POST', personal_url, personal_input, 403)
+        self.call(self.admin, 'POST', f'/api/users/{admin_id}/admin-payable', personal_input, 400)
+        self.call(self.admin, 'POST', f'/api/users/{external_id}/admin-payable', personal_input, 404)
+        self.call(self.admin, 'POST', personal_url, {'input': {'amount': '100', 'headId': head_id}}, 400)
+        added = self.call(self.admin, 'POST', personal_url, personal_input, 201)
+        self.assertEqual(added['transactionTypeId'], 2)
+        self.assertIsNone(added['headId'])
+        self.assertEqual(self.call(self.admin, 'GET', f'/api/users/{admin_id}/overview')['balance'], before_company)
+        paid = self.call(self.admin, 'POST', personal_url+'/payments', {'input': {'amount': '300'}}, 201)
+        self.assertEqual(paid['transactionTypeId'], 3)
+        self.assertEqual(self.call(self.admin, 'GET', f'/api/users/{admin_id}/overview')['balance'], before_company-300)
+        self.call(self.admin, 'POST', personal_url+'/payments', {'input': {'amount': '701'}}, 400)
+        self.call(self.admin, 'POST', '/api/transactions/credits', {'userId': worker_id,
+            'input': {'amount': '1', 'transactionTypeId': 2}}, 400)
+        add_version = int(added['versions'][-1]['versionId'])
+        self.call(self.admin, 'PUT', f"/api/transactions/{added['id']}/status", {'active': False, 'expectedVersion': add_version}, 400)
+        self.call(self.admin, 'DELETE', f"/api/transactions/{added['id']}?expectedVersion={add_version}", expected=400)
+        self.call(self.admin, 'PUT', f"/api/transactions/{added['id']}", {'expectedVersion': add_version,
+            'input': {'amount': '200', 'transactionTypeId': 2}}, 400)
+        pay_version = int(paid['versions'][-1]['versionId'])
+        self.call(self.admin, 'PUT', f"/api/transactions/{paid['id']}", {'expectedVersion': pay_version,
+            'input': {'amount': '1100', 'transactionTypeId': 3}}, 400)
+        inactive = self.call(self.admin, 'PUT', f"/api/transactions/{paid['id']}/status", {'active': False, 'expectedVersion': pay_version})
+        restored = self.call(self.admin, 'PUT', f"/api/transactions/{paid['id']}/status", {
+            'active': True, 'expectedVersion': int(inactive['versions'][-1]['versionId'])})
+        self.assertEqual([v['transactionTypeId'] for v in restored['versions']], [3, 3, 3])
+        def personal_payment(_):
+            return self.admin.post(personal_url+'/payments',
+                headers={'X-Cashbook': '1'}, json={'input': {'amount': '600'}}).status_code
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            self.assertEqual(sorted(executor.map(personal_payment, range(2))), [201, 400])
+        self.call(self.admin, 'POST', personal_url+'/payments', {'input': {'amount': '100'}}, 201)
+        self.call(self.admin, 'POST', personal_url+'/payments', {'input': {'amount': '1'}}, 400)
+
         self.call(self.admin, 'PUT', f'/api/users/{worker_id}/password', {'password': 'replacement-password'}, 204)
         self.call(self.user, 'GET', '/api/state', expected=401)
         self.assertIsNone(self.call(self.user, 'GET', '/api/session'))

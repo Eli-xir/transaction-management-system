@@ -3,7 +3,7 @@ import { buildHeadTree } from '../Admin/utils/headTree.ts';
 
 export const money = (amount: number) => `PKR ${(amount === 0 ? 0 : amount).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 export const roundMoney = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
-export const isCompanyTransaction = (entry: Transaction) => !!entry.creditUserId || entry.userId !== entry.createdBy;
+export const isCompanyTransaction = (entry: Transaction) => entry.transactionTypeId !== 2 && (entry.transactionTypeId === 3 || !!entry.creditUserId || entry.userId !== entry.createdBy);
 export const direction = (entry: Transaction, company = false) => company
   ? entry.creditUserId ? 'credit' : 'debit'
   : entry.createdBy === entry.userId ? 'debit' : 'credit';
@@ -78,7 +78,7 @@ export function ledgerReport(entries: Transaction[], filters: FiltersState, orde
     || day(entry.createdAt) === filters.dateFrom && !!filters.timeFrom && time(entry.createdAt) < filters.timeFrom);
   const signed = (entry: Transaction) => entryDirection(entry) === 'credit' ? entry.amount : -entry.amount;
   const branch = headBranchIds(heads, filters.headId);
-  const account = entries.filter((entry) => entry.active && matchesContractScope(entry, filters.contractId) && (!company || isCompanyTransaction(entry)) && matchesUserScope(entry, filters.userScope)
+  const account = entries.filter((entry) => entry.active && (company || filters.showAdminPayable !== false || ![2, 3].includes(entry.transactionTypeId ?? 1)) && matchesContractScope(entry, filters.contractId) && (!company || isCompanyTransaction(entry)) && matchesUserScope(entry, filters.userScope)
     && (!branch || (entry.headId !== null && branch.has(entry.headId))) && (!filters.description || (entry.description ?? '').toLowerCase().includes(filters.description.toLowerCase())));
   const selected = account.filter((entry) => filters.direction === 'both' || entryDirection(entry) === filters.direction);
   const opening = selected.filter(beforeStart).reduce((sum, entry) => roundMoney(sum + signed(entry)), 0);

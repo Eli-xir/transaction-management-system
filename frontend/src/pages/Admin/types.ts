@@ -36,6 +36,7 @@ export interface CreditUser {
 }
 
 export interface FiltersState {
+  showAdminPayable?: boolean;
   contractId?: string;
   timeFrom?: string;
   timeTo?: string;

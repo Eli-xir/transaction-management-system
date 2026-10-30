@@ -117,6 +117,7 @@ class ContractTests(unittest.TestCase):
         db = Mock()
         db.execute.return_value.fetchone.side_effect = [
             {'transaction_id': 12, 'current_version_id': 4, 'contract_id': 'c', 'credit_user_id': 'p', 'is_active': False},
+            {'transaction_type_id': 1},
             {'transaction_amount': Decimal('400')}]
         change = TransactionChange(op='transaction', action='reactivate', id=12, expectedVersion=4)
         with patch('service.validate_receipt', side_effect=HTTPException(400, 'exceeds')) as validate, patch('service.revise') as revise:
