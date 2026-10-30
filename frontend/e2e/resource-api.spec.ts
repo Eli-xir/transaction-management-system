@@ -122,6 +122,68 @@ test.afterEach(async () => {
   expect(browserErrors, 'Browser must not throw uncaught errors').toEqual([]);
 });
 
+for (const view of ['statement', 'attachments'] as const) {
+  test(`${view} selection toolbar exports attachments only from individually selected transactions`, async ({ page }) => {
+    const worker = await call(api, 'POST', '/users', { profile: {
+      user_name: `Selected ${view === 'statement' ? 'S' : 'A'} images ${Date.now()}`, contacts: [],
+    }, password: userPassword }, 201);
+    const images = [];
+    const entries = [];
+    for (let index = 0; index < 3; index++) {
+      const uploaded = await api.post('/api/attachments', { headers: { 'X-Cashbook': '1' }, multipart: {
+        kind: 'image', file: { name: `selected-${index}.png`, mimeType: 'image/png', buffer: png },
+      } });
+      expect(uploaded.status()).toBe(200);
+      const image = await uploaded.json();
+      images.push(image);
+      entries.push(await call(api, 'POST', '/transactions/credits', { userId: worker.user_id,
+        input: { amount: 10 + index, headId: null, description: `Private selected row ${index}`, attachments: [image] },
+      }, 201));
+    }
+    const withoutImages = await call(api, 'POST', '/transactions/credits', { userId: worker.user_id,
+      input: { amount: 5, headId: null, description: 'Selected entry without evidence', attachments: [] },
+    }, 201);
+    if (view === 'statement') {
+      await home(page, 'receivable');
+      await accountCard(page, worker.user_name).getByRole('button', { name: 'View statement', exact: true }).click();
+    } else {
+      await home(page, 'attachments');
+      await page.getByLabel('Search attachment users', { exact: true }).fill(worker.user_name);
+      await accountCard(page, worker.user_name).locator('button.home-card-main').click();
+    }
+    await page.getByRole('button', { name: 'Select entries', exact: true }).click();
+    const toolbar = page.getByRole('region', { name: 'Selected entry actions', exact: true });
+    const exportButton = toolbar.getByRole('button', { name: 'Attachments only', exact: true });
+    await expect(exportButton).toBeDisabled();
+    await page.getByRole('checkbox', { name: `Select entry ${withoutImages.id}`, exact: true }).check();
+    await expect(exportButton).toBeDisabled();
+    // Deliberately choose nonadjacent transactions without enabling Select range.
+    await page.getByRole('checkbox', { name: `Select entry ${entries[0].id}`, exact: true }).check();
+    await page.getByRole('checkbox', { name: `Select entry ${entries[2].id}`, exact: true }).check();
+    await expect(toolbar).toContainText('3 entries selected');
+    await expect(toolbar.getByRole('button', { name: 'Select range', exact: true })).toHaveAttribute('aria-pressed', 'false');
+    const exported = page.waitForResponse((response) => response.url().endsWith('/api/attachments/export'));
+    await exportButton.click();
+    expect((await exported).request().postDataJSON().ids).toEqual([Number(images[0].id), Number(images[2].id)]);
+    const preview = page.getByRole('dialog', { name: 'Attachments only', exact: true });
+    await expect(preview).toBeVisible();
+    await expect(preview.getByRole('button', { name: 'Print', exact: true })).toBeEnabled();
+    await expect(preview.getByRole('button', { name: 'Share…', exact: true })).toBeEnabled();
+    const downloaded = page.waitForEvent('download');
+    await preview.getByRole('button', { name: 'Download PDF', exact: true }).click();
+    expect((await downloaded).suggestedFilename()).toBe('attachments.pdf');
+    await preview.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(toolbar).toContainText('3 entries selected');
+    await page.getByRole('checkbox', { name: `Select entry ${entries[0].id}`, exact: true }).uncheck();
+    const reexported = page.waitForResponse((response) => response.url().endsWith('/api/attachments/export'));
+    await exportButton.click();
+    expect((await reexported).request().postDataJSON().ids).toEqual([Number(images[2].id)]);
+    await preview.getByRole('button', { name: 'Close', exact: true }).click();
+    await toolbar.getByRole('button', { name: 'Clear selection', exact: true }).click();
+    await expect(exportButton).toBeDisabled();
+  });
+}
+
 test('login errors stay friendly and a valid login loads every home card', async ({ page }) => {
   await page.context().clearCookies();
   await page.goto('/login');

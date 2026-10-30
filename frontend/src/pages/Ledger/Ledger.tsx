@@ -6,6 +6,7 @@ import { cashbookApi } from '../../data/cashbookApi';
 import { dateRangeLabel, invalidDateRange, direction, headBranchIds, headPath, isCompanyTransaction, ledgerReport, matchesUserScope, matchesContractScope, money } from './ledgerModel';
 import type { LedgerOrder } from './ledgerModel';
 import { ReportActions } from './ReportActions';
+import { AttachmentExport } from './AttachmentExport';
 import type { ReportDocument } from './ledgerExport';
 import { TransactionCard } from './TransactionCard';
 import './Ledger.css';
@@ -204,7 +205,10 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
       <strong role="status">{selectedIds.size} {selectedIds.size === 1 ? 'entry' : 'entries'} selected</strong>
       <button className="btn" aria-pressed={selection.range} onClick={() => setSelection((current) => ({ ...current, range: !current.range, anchor: null }))}>{selection.range ? 'Cancel range' : 'Select range'}</button>
       {selection.range && <span>{selection.anchor === null ? 'Tap the first entry' : 'Tap the last entry'}</span>}
-      {attachmentReview ? attachmentReview.export(selectedReport().records, selectedReport().document, true) : <ReportActions selected disabled={!selectedIds.size} getReport={() => selectedReport().document} />}
+      {attachmentReview ? attachmentReview.export(selectedReport().records, selectedReport().document, true) : <>
+        <ReportActions selected disabled={!selectedIds.size} getReport={() => selectedReport().document} />
+        <AttachmentExport items={selectedReport().records.flatMap(({ entry }) => entry.attachments)} />
+      </>}
       <button className="btn" disabled={!selectedIds.size} onClick={() => setSelection((current) => ({ ...current, ids: new Set(), anchor: null, range: false }))}>Clear selection</button>
       <button className="btn" onClick={() => setSelection({ scope, active: false, ids: new Set(), anchor: null, range: false })}>Cancel</button>
     </div>}
