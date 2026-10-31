@@ -27,12 +27,6 @@ class EditReceipt(Model):
     allocations: list[Allocation] = Field(max_length=200)
 
 
-class ReturnReceipt(Model):
-    expectedVersion: RecordId
-    amount: Decimal = Field(gt=0, le=999999999999.99, max_digits=18, decimal_places=2, allow_inf_nan=False)
-    description: str = Field(default='', max_length=4000)
-
-
 def allocations(db, version_id):
     return db.execute('SELECT * FROM receipt_allocations WHERE version_id=%s ORDER BY position', (version_id,)).fetchall()
 
@@ -121,25 +115,6 @@ def edit(db, actor, receipt_id, value):
     entry['contract_id'] = rows[0]['contract_id'] if len(rows) == 1 and rows[0]['kind'] == 'contract' and rows[0]['amount'] == value.input.amount else None
     revise(db, entry, actor['user_id'], 'Receipt and allocations edited', value.input, ids, allocation_values=rows)
     result = ledger(db, transaction_id=receipt_id)[0]
-    db.commit()
-    return result
-
-
-def refund(db, actor, receipt_id, value):
-    from service import ledger, require, revise
-    entry = original(db, actor, receipt_id, value.expectedVersion)
-    require(entry['is_active'], 'Reactivate this receipt before returning money.')
-    amount = db.execute('SELECT transaction_amount FROM transaction_versions WHERE version_id=%s', (entry['current_version_id'],)).fetchone()['transaction_amount']
-    unallocated = amount - sum((r['amount'] for r in allocations(db, entry['current_version_id'])), Decimal(0)) - returned(db, receipt_id)
-    require(value.amount <= unallocated, f'Only PKR {unallocated:,.2f} is available to return. Reduce allocations first if needed.')
-    child = db.execute('''INSERT INTO transactions(user_id,created_by_user_id,credit_user_id,current_version_id)
-        VALUES (%s,%s,%s,0) RETURNING *''', (entry['user_id'], actor['user_id'], entry['credit_user_id'])).fetchone()
-    register(db, child, receipt_id)
-    data = TransactionInput(amount=value.amount, description=value.description)
-    revise(db, child, actor['user_id'], 'Unallocated money returned', data, [])
-    # Advance the origin version too: a second return from the same stale screen fails.
-    revise(db, entry, actor['user_id'], 'Return recorded')
-    result = ledger(db, transaction_id=child['transaction_id'])[0]
     db.commit()
     return result
 

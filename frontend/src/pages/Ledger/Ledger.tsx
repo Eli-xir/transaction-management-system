@@ -13,7 +13,7 @@ import { TransactionCard } from './TransactionCard';
 import './Ledger.css';
 import { LedgerFilters } from './LedgerFilters';
 import { selectedEntriesReport, toggleEntry } from './entrySelection';
-import { allocationLabel, contractStatementEntries } from './receiptModel';
+import { allocationLabel, contractStatementEntries, receiptStatementEntries } from './receiptModel';
 
 export interface EntrySelection {
   active: boolean; ids: Set<string>; toggle: (id: string, shift?: boolean) => void;
@@ -76,7 +76,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const transactions = (data?.transactions ?? []).filter((entry) => company
     ? isCompanyTransaction(entry)
     : attachmentReview || !(data?.users ?? users).some((user) => user.user_id === entry.userId && user.role === 'admin'));
-  const scopedTransactions = contract ? contractStatementEntries(transactions, contract.id) : transactions;
+  const scopedTransactions = contract ? contractStatementEntries(transactions, contract.id) : company || contractColumn ? receiptStatementEntries(transactions) : transactions;
   const report = ledgerReport(scopedTransactions, filters, order, reportHeads, company);
   const selectedIds = new Set(selectionActive ? report.rows.filter(({ entry }) => selection.ids.has(entry.id)).map(({ entry }) => entry.id) : []);
   function toggleSelection(id: string, shift = false) {
@@ -99,7 +99,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const userName = (id: string) => id.startsWith('credit:')
     ? data?.creditUsers.find((user) => user.credit_user_id === id.slice(7))?.user_name ?? 'Unavailable external user'
     : data?.users.find((user) => user.user_id === id)?.user_name ?? 'Unavailable account';
-  const openEntry = (entry: Transaction) => setSelected(data?.transactions.find((original) => original.id === entry.id) ?? entry);
+  const openEntry = (entry: Transaction) => setSelected(data?.transactions.find((original) => original.id === (entry.sourceTransactionId ?? entry.id)) ?? entry);
   const entryUserName = (entry: Transaction) => entry.creditUserId
     ? data?.creditUsers.find((user) => user.credit_user_id === entry.creditUserId)?.user_name ?? 'Unavailable external user'
     : company && (data?.users ?? users).some((user) => user.user_id === entry.userId && user.role === 'admin')
@@ -108,13 +108,13 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const receivedLabel = `Total received by ${filters.userScope === 'all' ? 'users' : userName(filters.userScope)}`;
   const branchLabel = filters.headId == null ? '' : `${headPath(reportHeads, filters.headId)} · Includes subheads`;
   const dateLabel = dateRangeLabel(filters);
-  const contractName = (id?: string | null) => !id || id === '__none__' ? 'Unallocated' : id === '__profit__' ? 'Company profit' : data?.contracts?.find((item) => item.id === id)?.name ?? contract?.name ?? 'Unavailable contract';
+  const contractName = (id?: string | null) => !id || id === '__none__' ? 'Direct receipt' : id === '__profit__' ? 'Company profit' : data?.contracts?.find((item) => item.id === id)?.name ?? contract?.name ?? 'Unavailable contract';
   const contractOptions = (data?.contracts ?? []).filter((item) => !filters.userScope.startsWith('credit:') || item.creditUserIds.includes(filters.userScope.slice(7)) || transactions.some((entry) => entry.contractId === item.id && matchesUserScope(entry, filters.userScope)));
   const subtitle = [branchLabel, !company && filters.showAdminPayable === false ? 'Admin payable excluded' : '', filters.contractId ? `Contract: ${contractName(filters.contractId)}` : '', dateLabel, company && filters.userScope !== 'all' ? userName(filters.userScope) : '', filters.description ? `Description: ${filters.description}` : ''].filter(Boolean).join(' · ');
   const columns = ['Date/time', 'User', 'Entered by', contractColumn ? 'Contract' : 'Head', 'Description', 'Credit', 'Debit', 'Balance'];
   const entryCells = (entry: Transaction, balance: number): (string | number)[] => [
     new Date(entry.createdAt).toLocaleString(), entryUserName(entry), userName(entry.createdBy),
-    contractColumn ? contract ? contract.name : allocationLabel(entry, contractName) : entry.headPath ?? headPath(data?.heads ?? [], entry.headId), [adminPayableLabel(entry), !contractColumn && entry.creditUserId ? allocationLabel(entry, contractName) : '', entry.description ?? ''].filter(Boolean).join(' · '),
+    entry.creditUserId ? contract ? contract.name : allocationLabel(entry, contractName) : entry.headPath ?? headPath(data?.heads ?? [], entry.headId), [adminPayableLabel(entry), entry.description ?? ''].filter(Boolean).join(' · '),
     entryDirection(entry) === 'credit' ? entry.amount : '', entryDirection(entry) === 'debit' ? entry.amount : '', balance,
   ];
   const totalCells = (label: string, balance: number, credit: number | string = '', debit: number | string = ''): (string | number)[] => [label, '', '', '', '', credit, debit, balance];
@@ -198,7 +198,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
           return <tr ref={rowEntry && rowEntry.id === report.rows.at(-1)?.entry.id ? lastEntry : undefined} key={rowEntry ? `transaction:${rowEntry.id}` : `total:${index}`} className={rowEntry ? `ledger-entry${selectedIds.has(rowEntry.id) ? ' entry-selected' : ''}` : 'ledger-total'} onClick={(event) => { if (rowEntry) { if (selectionActive) toggleSelection(rowEntry.id, event.shiftKey); else openEntry(rowEntry); } }}>
             {selectionActive && <td>{rowEntry && <input type="checkbox" aria-label={`Select entry ${rowEntry.id}`} checked={selectedIds.has(rowEntry.id)} onClick={(event) => { event.stopPropagation(); toggleSelection(rowEntry.id, event.shiftKey); }} onChange={() => {}} />}</td>}
             {cells.map((value, column) => <td key={column} className={column >= 5 ? 'ledger-amount' : undefined}>{column === 0 && rowEntry && !selectionActive ? <button className="ledger-row-link" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>{value}</button> : typeof value === 'number' ? money(value) : value}
-              {column === 4 && rowEntry?.receiptKey && !rowEntry.receiptParentId && !selectionActive && <button className="btn receipt-details-button" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>Show all allocations</button>}
+              {column === 4 && rowEntry?.sourceTransactionId && rowEntry.receiptKey && !selectionActive && <button className="btn" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>{rowEntry.receiptKey}</button>}
             </td>)}
           </tr>;
         })}

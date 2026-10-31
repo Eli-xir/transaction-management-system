@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Transaction } from '../src/pages/Admin/types.ts';
 import { contractBalance, contractContributions } from '../src/pages/Admin/utils/contractBalances.ts';
 import { ledgerReport, direction } from '../src/pages/Ledger/ledgerModel.ts';
-import { allocationLabel, contractStatementEntries } from '../src/pages/Ledger/receiptModel.ts';
+import { allocationLabel, contractStatementEntries, receiptStatementEntries } from '../src/pages/Ledger/receiptModel.ts';
 
 const root: Transaction = { id: '1', userId: 'admin', createdBy: 'admin', creditUserId: 'payer', headId: null,
   amount: 1000, receiptKey: 'AB12CD34', active: true, createdAt: '2026-10-20T12:00:00Z', attachments: [], returnedAmount: 100,
@@ -50,7 +50,7 @@ test('Unallocated and company-profit filters find partial receipts and omit retu
     const report = ledgerReport(entries, { ...filters, contractId }, 'by-time', [], true);
     assert.deepEqual(report.rows.map(({ entry }) => entry.id), ['1']);
   }
-  assert.equal(allocationLabel(root, (id) => id ?? ''), 'a · b · Company profit · Unallocated');
+  assert.equal(allocationLabel(root, (id) => id ?? ''), 'a · b · Company profit · Direct receipt');
   assert.equal(allocationLabel(refund, () => ''), 'Unallocated return');
   const settled = { ...root, returnedAmount: 250 };
   assert.equal(ledgerReport([settled], { ...filters, contractId: '__none__' }, 'by-time', [], true).rows.length, 0);
@@ -60,4 +60,17 @@ test('Deactivating receipts removes contract attribution and company cash withou
   const inactive = { ...root, active: false };
   assert.equal(contractContributions('a', [inactive, normal]).size, 0);
   assert.equal(ledgerReport([inactive, normal], filters, 'by-time', [], true).closing, -50);
+});
+
+
+test('Split rows preserve the full receipt, direct remainder, shared evidence and original edit target', () => {
+  const rows = receiptStatementEntries([root, refund, normal]);
+  assert.deepEqual(rows.slice(0, 4).map(r => r.amount), [300, 200, 250, 250]);
+  assert.equal(new Set(rows.map(r => r.id)).size, rows.length);
+  assert.ok(rows.slice(0, 4).every(r => r.sourceTransactionId === root.id && r.attachments === root.attachments));
+  const report = ledgerReport(rows, filters, 'by-time', [], true);
+  assert.equal(report.credit, 1000);
+  assert.equal(report.debit, 150);
+  assert.equal(report.closing, 850);
+  assert.deepEqual(receiptStatementEntries([normal]), [normal]);
 });

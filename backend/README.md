@@ -203,12 +203,9 @@ receipts receive a permanent eight-character alphanumeric `receiptKey`.
 allocations must use a linked payer; overpayment is allowed. Contract balances
 use allocated amounts, with negative remaining balances classified as Payable.
 
-`POST /api/receipts/{id}/returns` accepts `expectedVersion`, `amount`, and an
-optional `description`. It creates one compensating cash debit, linked to the
-original receipt, limited to its unallocated amount. Original receipts and their
-returns share the same public key. Returns cannot be edited or deleted; an
-incorrect return can be deactivated, with history retained. Normal-user and
-Admin payable entry routes are unaffected.
+The former receipt-return creation endpoint has been removed. Historical return
+records remain readable and retain their accounting and edit guards; no balances
+or records are erased by removing the workflow.
 
 Migration012 introduces only `receipt_allocations`. Its `kind` distinguishes
 receipt identity, return links, and versioned contract/profit allocation rows.
@@ -219,9 +216,10 @@ existing schema-version tracker records migration12 as usual.
 
 Receipt totals stay in the original transaction, and attachments stay on its
 versions. Do not sum allocations into company cash or assume every external-user
-transaction is a credit: `receiptParentId` identifies a debit return. Contract
-statements project only the contract's allocated portion; editing one opens the
-original full receipt. Receipt keys/search controls are omitted from print/PDF
+transaction is a credit: `receiptParentId` identifies a debit return. Company and external statements display one row per allocation plus any direct
+remainder, whose amounts sum to the original receipt. Only split receipts have a
+Receipt ID button. Contract statements project only their allocated portion;
+editing any portion opens the original full receipt. Receipt keys/search controls are omitted from print/PDF
 and spreadsheet report documents.
 
 ## Verification

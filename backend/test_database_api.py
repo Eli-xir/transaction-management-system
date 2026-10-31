@@ -298,12 +298,17 @@ class DatabaseApiTests(unittest.TestCase):
             # Only one table was introduced; existing transactions have no receipt columns.
             self.assertEqual(connection.execute("SELECT count(*) AS n FROM information_schema.columns WHERE table_name='transactions' AND column_name IN ('receipt_key','receipt_parent_id')").fetchone()['n'], 0)
         refund_body = {'expectedVersion': version(saved), 'amount': '200', 'description': 'Unused money returned'}
-        self.call(self.user, 'POST', f'/api/receipts/{rid}/returns', refund_body, 403)
-        self.call(self.admin, 'POST', f'/api/receipts/{rid}/returns', {**refund_body, 'amount': '251'}, 400)
-        def refund(_):
-            return self.admin.post(f'/api/receipts/{rid}/returns', headers={'X-Cashbook': '1'}, json=refund_body).status_code
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            self.assertEqual(sorted(executor.map(refund, range(2))), [201, 409])
+        self.call(self.admin, 'POST', f'/api/receipts/{rid}/returns', refund_body, 404)
+        # Keep historical return coverage without exposing a return-creation API.
+        with self.connect_test() as connection:
+            from receipts import register
+            from service import revise
+            from models import TransactionInput
+            parent = connection.execute('SELECT * FROM transactions WHERE transaction_id=%s', (int(rid),)).fetchone()
+            child_entry = connection.execute('INSERT INTO transactions(user_id,created_by_user_id,credit_user_id,current_version_id) VALUES (%s,%s,%s,0) RETURNING *', (admin_id, admin_id, payer_id)).fetchone()
+            register(connection, child_entry, int(rid))
+            revise(connection, child_entry, admin_id, 'Historical return', TransactionInput(amount='200'), [])
+            revise(connection, parent, admin_id, 'Historical return recorded')
         root_after = self.call(self.admin, 'GET', f'/api/transactions/{rid}')
         self.assertEqual((root_after['amount'], root_after['returnedAmount'], root_after['unallocatedAmount']), (1000, 200, 50))
         grouped = [t for t in self.call(self.admin, 'GET', '/api/transactions')['items'] if t.get('receiptKey') == key]

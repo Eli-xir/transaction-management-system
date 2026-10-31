@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { Contract, ReceiptAllocation, Transaction } from '../Admin/types';
-import { cashbookApi } from '../../data/cashbookApi';
-import { historyOf, money } from './ledgerModel';
+import { money } from './ledgerModel';
 import { receiptAllocations, unallocatedAmount } from './receiptModel';
 
 export function ReceiptAllocationEditor({ entry, amount, contracts, values, onChange }: {
@@ -31,52 +30,20 @@ export function ReceiptAllocationEditor({ entry, amount, contracts, values, onCh
         onChange([...values, { kind: target === '__profit__' ? 'profit' : 'contract', contractId: target === '__profit__' ? null : target, amount: Math.max(0, unallocated) }]); setTarget('');
       }}>Add allocation</button>
     </div>
-    <p role="status" className={unallocated < 0 ? 'text-error' : undefined}>{unallocated < 0 ? `Overallocated by ${money(-unallocated)}` : `Unallocated: ${money(unallocated)}`}</p>
+    <p role="status" className={unallocated < 0 ? 'text-error' : undefined}>{unallocated < 0 ? `Overallocated by ${money(-unallocated)}` : `Remaining direct receipt: ${money(unallocated)}`}</p>
     {!!entry.returnedAmount && <p>Already returned: {money(entry.returnedAmount)}</p>}
   </section>;
 }
 
-export function ReceiptDetails({ entry, contracts, transactions, busy, onReturn, onBusyChange }: {
-  entry: Transaction; contracts: Contract[]; transactions: Transaction[]; busy: boolean;
-  onReturn: () => Promise<void>; onBusyChange: (busy: boolean) => void;
-}) {
-  const [returning, setReturning] = useState(false);
-  const [amount, setAmount] = useState('');
-  const [description, setDescription] = useState('');
-  const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
+export function ReceiptDetails({ entry, contracts }: { entry: Transaction; contracts: Contract[] }) {
   const allocations = receiptAllocations(entry);
-  const unallocated = unallocatedAmount(entry.amount, allocations, entry.returnedAmount);
-  const returns = transactions.filter((t) => t.receiptParentId === entry.id);
-  async function saveReturn() {
-    if (busy || saved) return;
-    onBusyChange(true); setError('');
-    try {
-      await cashbookApi.returnReceipt(entry.id, historyOf(entry).at(-1)!.versionId, Number(amount), description);
-      setSaved(true);
-      setReturning(false); await onReturn();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not record this return.'); }
-    finally { onBusyChange(false); }
-  }
+  const remaining = unallocatedAmount(entry.amount, allocations, entry.returnedAmount);
   return <section className="flex-col gap-sm">
-    <p>Receipt ID: <strong>{entry.receiptKey}</strong>{entry.receiptParentId ? ' · Unallocated return' : ` · Unallocated: ${money(unallocated)}`}</p>
-    {!entry.receiptParentId && <>
-      <details className="disclosure" open><summary>Show all allocations</summary>
-        <dl className="review-details"><dt>Receipt amount</dt><dd>{money(entry.amount)}</dd>
-          {allocations.map((a, i) => <div className="receipt-detail-item" key={i}><dt>{a.kind === 'profit' ? 'Company profit' : contracts.find((c) => c.id === a.contractId)?.name ?? a.contractName}</dt><dd>{money(a.amount)}</dd></div>)}
-          <dt>Unallocated</dt><dd>{money(unallocated)}</dd><dt>Returned</dt><dd>{money(entry.returnedAmount ?? 0)}</dd>
-        </dl>
-        {returns.map((t) => <p key={t.id}>Return · {money(t.amount)} · {new Date(t.createdAt).toLocaleString()} · {t.active ? 'Active' : 'Deactivated'}</p>)}
-      </details>
-      {saved && <p role="status">Return recorded. Close and refresh if the balances have not updated.</p>}
-      {entry.active && unallocated > 0 && !returning && !saved && <button type="button" className="btn" disabled={busy} onClick={() => setReturning(true)}>Return unallocated money</button>}
-      {returning && <form className="flex-col gap-sm" onSubmit={(event) => { event.preventDefault(); void saveReturn(); }}>
-        <p>This records a debit linked to this receipt. To return allocated money, remove its allocation first.</p>
-        <label className="field"><span>Return amount</span><input required disabled={busy} type="number" inputMode="decimal" min="0.01" max={unallocated} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-        <label className="field"><span>Return description</span><textarea disabled={busy} maxLength={4000} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
-        <div className="flex-row flex-wrap gap-sm"><button type="button" className="btn" disabled={busy} onClick={() => setReturning(false)}>Cancel return</button><button className="btn btn--primary" disabled={busy || Number(amount) <= 0 || Number(amount) > unallocated}>Confirm return</button></div>
-      </form>}
-    </>}
-    {error && <p role="alert" className="text-error">{error}</p>}
+    <p>Receipt ID: <strong>{entry.receiptKey}</strong></p>
+    {!entry.receiptParentId && allocations.length > 0 && <dl className="review-details">
+      <dt>Receipt amount</dt><dd>{money(entry.amount)}</dd>
+      {allocations.map((a, i) => <div className="receipt-detail-item" key={i}><dt>{a.kind === 'profit' ? 'Company profit' : contracts.find((c) => c.id === a.contractId)?.name ?? a.contractName}</dt><dd>{money(a.amount)}</dd></div>)}
+      {remaining > 0 && <><dt>Direct receipt</dt><dd>{money(remaining)}</dd></>}
+    </dl>}
   </section>;
 }

@@ -101,6 +101,7 @@ export interface TransactionRevision extends TransactionInput {
   headPath?: string;
 }
 export interface Transaction extends TransactionInput {
+  sourceTransactionId?: string;
   receiptKey?: string | null;
   receiptParentId?: string | null;
   allocations?: ReceiptAllocation[];

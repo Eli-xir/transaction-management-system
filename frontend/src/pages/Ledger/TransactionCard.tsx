@@ -64,8 +64,7 @@ export function TransactionCard({ entry, admin = false, company = false, heads =
   return <Dialog title={current ? `${direction(current, company) === 'credit' ? 'Credit' : 'Debit'} · ${money(current.amount)}` : 'Credit a user'} onClose={onClose} busy={locked}>
     {current && adminPayableLabel(current) && <p role="status">{adminPayableLabel(current)}</p>}
     {current?.contractId && <p>Contract: <strong>{contracts.find((contract) => contract.id === current.contractId)?.name ?? current.contractId}</strong></p>}
-    {current?.receiptKey && !editing && <ReceiptDetails key={historyOf(current).at(-1)!.versionId} entry={current} contracts={contracts} transactions={transactions} busy={locked} onBusyChange={setBusy}
-      onReturn={async () => { const saved = await cashbookApi.readTransaction(current.id); setCurrent(saved); await onChanged?.(); }} />}
+    {current?.receiptKey && !editing && <ReceiptDetails entry={current} contracts={contracts} />}
     {editing && admin ? <form className="flex-col gap-md" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <fieldset className="field flex-col gap-md" disabled={locked}>
         {!current && <label className="field"><span>User</span><select required value={userId} onChange={(event) => setUserId(event.target.value)}>

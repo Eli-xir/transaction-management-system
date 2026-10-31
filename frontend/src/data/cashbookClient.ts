@@ -138,8 +138,6 @@ export function createCashbookApi(request: ApiRequest, onSavedRefreshFailure?: (
     readTransaction: (id: string) => request<Transaction>(`/transactions/${idPath(id)}`),
     editReceipt: (id: string, input: TransactionInput, expectedVersion: string, allocations: ReceiptAllocation[]) =>
       write<Transaction>(`/receipts/${idPath(id)}/allocations`, 'PUT', { input, expectedVersion: Number(expectedVersion), allocations: allocations.map(({ kind, contractId, amount }) => ({ kind, contractId: contractId || null, amount })) }),
-    returnReceipt: (id: string, expectedVersion: string, amount: number, description: string) =>
-      write<Transaction>(`/receipts/${idPath(id)}/returns`, 'POST', { expectedVersion: Number(expectedVersion), amount, description }),
     transactionAction: async (id: string, action: 'deactivate' | 'reactivate' | 'delete', expectedVersion: string) => {
       if (action === 'delete') { await write(`/transactions/${idPath(id)}?expectedVersion=${Number(expectedVersion)}`, 'DELETE'); return null; }
       return write<Transaction>(`/transactions/${idPath(id)}/status`, 'PUT', { active: action === 'reactivate', expectedVersion: Number(expectedVersion) });

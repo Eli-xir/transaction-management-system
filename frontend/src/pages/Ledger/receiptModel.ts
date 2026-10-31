@@ -20,11 +20,25 @@ export function contractStatementEntries(entries: Transaction[], contractId: str
     .map((entry) => ({ ...entry, amount: contractAmount(entry, contractId) }));
 }
 
+// Display portions of one receipt; never persist additional cash transactions.
+export function receiptStatementEntries(entries: Transaction[]) {
+  return entries.flatMap((entry): Transaction[] => {
+    if (!entry.creditUserId || entry.receiptParentId) return [entry];
+    const allocations = receiptAllocations(entry);
+    const remaining = unallocatedAmount(entry.amount, allocations);
+    const parts = [...allocations, ...(remaining > 0 ? [{ kind: 'direct' as const, amount: remaining }] : [])];
+    if (parts.length <= 1) return [entry];
+    return parts.map((part, index) => ({ ...entry, id: `${entry.id}:part:${index}`, sourceTransactionId: entry.id,
+      amount: part.amount, contractId: part.kind === 'contract' ? part.contractId : null,
+      allocations: part.kind === 'direct' ? [] : [part], returnedAmount: 0 }));
+  });
+}
+
 export function allocationLabel(entry: Transaction, contractName: (id?: string | null) => string) {
   if (entry.receiptParentId) return 'Unallocated return';
   if (!entry.creditUserId) return '';
   const items = receiptAllocations(entry);
   const labels = items.map((item) => item.kind === 'profit' ? 'Company profit' : contractName(item.contractId));
-  if (unallocatedAmount(entry.amount, items, entry.returnedAmount) > 0) labels.push('Unallocated');
-  return labels.join(' · ') || 'Unallocated';
+  if (unallocatedAmount(entry.amount, items, entry.returnedAmount) > 0) labels.push('Direct receipt');
+  return labels.join(' · ') || 'Direct receipt';
 }

@@ -602,7 +602,7 @@ test('Admin payable is separate, direct, toggleable, and payable from its cards 
   await expect(accountCard(page, target.user_name)).toHaveCount(0);
 });
 
-test('external receipt splits share evidence, return unused money, hide keys in print and move overpaid contracts to Payable', async ({ page }, info) => {
+test('external receipt splits share evidence,  hide keys in print and move overpaid contracts to Payable', async ({ page }, info) => {
   const unique = `Split ${info.project.name} ${Date.now()}`;
   const source = await call(api, 'GET', `/transactions/${creditId}`);
   const admin = await call(api, 'GET', '/session');
@@ -621,7 +621,7 @@ test('external receipt splits share evidence, return unused money, hide keys in 
   const inactive = page.locator('details.disclosure').filter({ has: page.locator('summary', { hasText: 'Deactivated entries' }) });
   await inactive.locator('summary').click();
   await expect(inactive.getByRole('button')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Show all allocations', exact: true }).click();
+  await page.locator('tr.ledger-entry .ledger-row-link').click();
   let dialog = page.getByRole('dialog').filter({ visible: true }).last();
   await expect(dialog).toContainText(receipt.receiptKey);
   await expect(dialog.getByAltText(attachmentName).first()).toBeVisible();
@@ -637,25 +637,22 @@ test('external receipt splits share evidence, return unused money, hide keys in 
   await dialog.getByLabel('Allocate to', { exact: true }).selectOption('__profit__');
   await dialog.getByRole('button', { name: 'Add allocation', exact: true }).click();
   await dialog.getByLabel('Allocation amount 3', { exact: true }).fill('250');
-  await expect(dialog.getByRole('status')).toContainText('Unallocated: PKR 250');
+  await expect(dialog.getByRole('status')).toContainText('Remaining direct receipt: PKR 250');
   const save = page.waitForResponse((r) => r.url().endsWith(`/api/receipts/${receipt.id}/allocations`) && r.request().method() === 'PUT');
   await dialog.getByRole('button', { name: 'Save new version', exact: true }).click();
   expect((await save).status()).toBe(200);
-  await expect(dialog.getByRole('button', { name: 'Return unallocated money', exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Return unallocated money', exact: true }).click();
-  await dialog.getByLabel('Return amount', { exact: true }).fill('100');
-  await dialog.getByLabel('Return description', { exact: true }).fill('Unused money returned');
-  const returned = page.waitForResponse((r) => r.url().endsWith(`/api/receipts/${receipt.id}/returns`) && r.request().method() === 'POST');
-  await dialog.getByRole('button', { name: 'Confirm return', exact: true }).click();
-  expect((await returned).status()).toBe(201);
-  await expect(dialog).toContainText('Unallocated: PKR 150');
+  await expect(dialog.getByRole('button', { name: 'Return unallocated money', exact: true })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-  await expect(page.locator('tr.ledger-entry')).toHaveCount(2);
-  await expect(page.locator('tr.ledger-entry').filter({ hasText: 'Unallocated return' })).toContainText('PKR 100');
+  await expect(page.locator('tr.ledger-entry')).toHaveCount(4);
+  await expect(page.locator('tr.ledger-entry').filter({ hasText: 'Direct receipt' })).toContainText('PKR 250');
+  await expect(page.getByRole('button', { name: receipt.receiptKey, exact: true })).toHaveCount(4);
+  await page.getByRole('button', { name: receipt.receiptKey, exact: true }).first().click();
+  await expect(dialog).toContainText('PKR 1,000');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Preview / export', exact: true }).click();
   const preview = page.getByRole('dialog', { name: 'Ledger preview' });
   const printBody = preview.locator('iframe').contentFrame().locator('body');
-  await expect(printBody).toContainText('Unused money returned');
+  await expect(printBody).toContainText('Direct receipt');
   await expect(printBody).not.toContainText(receipt.receiptKey);
   await expect(printBody).not.toContainText('Show all allocations');
   await preview.getByRole('button', { name: 'Close', exact: true }).click();
