@@ -1,71 +1,48 @@
 # Cashbook
 
-Local React/Vite frontend, FastAPI backend and PostgreSQL. Production runs on Lightsail with private S3 media and GitHub Actions deployment; see [deployment](deploy/README.md).
+A cashbook for company accounts, users, external receipts, and contracts—with images, voice notes, and printable statements. Built with React, FastAPI, and PostgreSQL, with a responsive interface for desktop and mobile.
 
-## Run on this machine
+## What it does
 
-PostgreSQL has been started using `database/compose.yaml`. To start it again:
+| Area | Features |
+| --- | --- |
+| Home | Balance overview, rearrangeable action cards, and pinned accounts. |
+| Users & access | Normal and external users, profiles, multiple contacts, account status, passwords, head permissions, and a safe user preview. |
+| Head management | Nested heads, search, transaction permissions, staged edits/moves/merges, backups, and undo/redo before Apply. |
+| Entry workflows | User debit for payments, User credit for bills recorded on a user’s behalf, and Admin credit for external receipts. Images, voice, description, and review steps keep evidence with entries. |
+| Statements | Company and user statements; date/time, user, head/contract, and description filters; credit/debit views, ordering, carry-forward balances, and scroll to last. |
+| Selection & reports | Select individual entries or ranges, unselect them, preview, print, export PDF/Excel/CSV, share supported files, or export attachments only. |
+| Attachments | Camera/gallery/file uploads, voice recording and audio uploads, head-wise browsing, image previews, and image-only PDFs. |
+| Contracts & receipts | Shared contracts linked to external users, individual contributions, contract/profit/direct receipt portions, Receipt ID search, and field-by-field inheritance of descriptions, images, and voice notes. |
+| Outstanding balances | Receivable and Payable include contract balances; overpaid contracts move to Payable and zero balances are excluded. |
+| Admin payable | Personal obligations remain separate from company cash; payments appear in Company Statement. User statements can show or hide these entries. |
+| History | Versioned edits and retained evidence, deactivated-entry review, and checks against saving stale changes. |
 
-```powershell
-cd database
-docker compose -p cashbook-local up -d
-```
+## Production screenshots
 
-In a backend terminal:
+Amounts and private details are heavily blurred. These are captures of the live application, not mockups. Click an image to inspect it.
 
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-uvicorn main:app --reload
-```
+<table>
+<tr>
+<td width="50%"><strong>Home dashboard</strong><br><a href="docs/screenshots/01-home.webp"><img src="docs/screenshots/01-home.webp" alt="Production dashboard with financial amounts blurred" width="520"></a></td>
+<td width="50%"><strong>Head management</strong><br><a href="docs/screenshots/02-heads.webp"><img src="docs/screenshots/02-heads.webp" alt="Nested head management and staged-change controls" width="520"></a></td>
+</tr>
+<tr>
+<td><strong>User management</strong><br><a href="docs/screenshots/04-users.webp"><img src="docs/screenshots/04-users.webp" alt="User account cards and management actions with private details blurred" width="520"></a></td>
+<td><strong>Company Statement</strong><br><a href="docs/screenshots/09-company-statement.webp"><img src="docs/screenshots/09-company-statement.webp" alt="Company Statement filters and ledger with amounts blurred" width="520"></a></td>
+</tr>
+<tr>
+<td><strong>Preview & export</strong><br><a href="docs/screenshots/11-report-preview.webp"><img src="docs/screenshots/11-report-preview.webp" alt="Printable report preview with PDF Excel CSV share and print controls" width="520"></a></td>
+<td><strong>Attachment browsing</strong><br><a href="docs/screenshots/15-attachments.webp"><img src="docs/screenshots/15-attachments.webp" alt="Head-wise attachment browsing with voice notes and export controls" width="520"></a></td>
+</tr>
+<tr>
+<td><strong>Contracts & linked users</strong><br><a href="docs/screenshots/13-contract-details.webp"><img src="docs/screenshots/13-contract-details.webp" alt="Contract balance and linked external user contributions with amounts blurred" width="520"></a></td>
+<td><strong>Details for each receipt portion</strong><br><a href="docs/screenshots/14-portion-details.webp"><img src="docs/screenshots/14-portion-details.webp" alt="Receipt portion editor showing inherited description and attachment controls" width="520"></a></td>
+</tr>
+</table>
 
-If PowerShell blocks activation, use `.\.venv\Scripts\python.exe -m uvicorn main:app --reload` instead.
+## Run, test & maintain
 
-In a frontend terminal:
+Start with the [development guide](docs/DEVELOPMENT.md) for local setup and commands. See the [backend API guide](backend/README.md), [database notes](database/README.md), and [production deployment guide](deploy/README.md) for implementation and operations.
 
-```powershell
-cd frontend
-npm run dev
-```
-
-Open the Vite address, normally `http://localhost:5173`. Login as **Sohail Malik** (or `admin`). The generated initial password is the `ADMIN_PASSWORD` value in **backend/.env**. That file is ignored by Git. First backend startup creates the schema and admin if needed; later startups preserve data. Change passwords through Users after that; editing the environment value does not reset an existing account.
-
-## Fresh machine setup
-
-Install Python 3.13, Node.js compatible with the frontend's Vite version, and Docker Desktop with Linux containers. Then:
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env
-# Set ADMIN_PASSWORD in .env before first startup.
-cd ../frontend
-npm ci
-```
-
-Start PostgreSQL and the two applications using the commands above. The API stays on localhost:8000; Vite proxies `/api`, including uploads and downloads. For a phone on the same Wi-Fi, use the computer's LAN address and Vite port. Mobile microphone recording needs a secure browser context (HTTPS); audio-file upload remains available on local HTTP. Production uses HTTPS.
-
-## Behavior
-
-- Home's Admin payable card tracks personal amounts the administrator owes normal users. Additions use amount, images, voice and description without heads and never change company cash totals. Payments reduce the personal balance and appear once in Company Statement. Pay Admin payable is available from User debit and each outstanding personal account. User statements label these entries and include a Show Admin payable toggle that also controls report totals and exports.
-
-- Sohail is the administrator. Users cannot modify profiles, contacts, passwords, heads or permissions. Admin manages all of those, including multiple contacts per user.
-- Users see the balance/amount cards, then category, heads, optional images, optional voice, review and submit. Swipe right for their credits ledger. Their own bill entries never appear in their history or media downloads.
-- Admin preview lets the admin explore the user's workflow without submitting transactions. Home's User credit card lets the admin explicitly record a bill for an active user, through that user's assigned heads and the usual evidence/review steps. User debit remains the direct payment flow; Admin credit handles external receipts and contracts. No user login or password is needed for User credit. Entered by shows the selected user; the edit trail retains the administrator who recorded it.
-- Permissions inherit through head branches, with the nearest explicit grant or denial taking precedence. Moving a branch changes inherited access while keeping explicit assignments attached to their head IDs. Deleted/merged heads keep hidden database records so their old IDs do not get reused.
-- Head edits, moves, merges, activation and deletion are staged with undo/redo and Apply. Merge transfers transactions to the target and adds an edit-trail version; child heads move under the target. Deactivation includes existing descendants; reactivation affects only the selected head.
-- Head deletion removes the branch and its transactions and versions. Create backup copies the entire branch to the top level, with a dated Backup suffix on every copied head. Copies include transactions, edit history and retained attachments; all copied heads and transactions are deactivated and excluded from totals. Merging offers a backup of the source branch before it is removed. Backups are staged with undo/redo and created on Apply.
-- Admin can remove categories from future selections without deleting existing transactions. Adding the same category name again restores it.
-- Account deletion is blocked by transaction/edit history; deactivate instead. Deactivation and password changes revoke the affected user's sessions (the admin's current session survives their own password change).
-- Total received is active admin credits. Total Bill Payment is active user bills. Remaining Payable Balance = bills − received; positive means owed to the user. `1,635,250 − 1,415,750 = 219,500`.
-- The schema uses exact decimal amounts in the units entered, with at most two decimal places. No hidden multiplication/division into paisa. This replaces the earlier unconfirmed integer/minor-unit assumption.
-- Admin ledger filters, head branches, ordering, frontend pages, carry-forward, PDF, Excel and print remain client-side. No attachments column or entry-ID column is exported. User reports contain credits and their three summary figures only.
-
-## Data and maintenance
-
-PostgreSQL uses the separate `cashbook_local_v2` Docker volume on localhost port 5433. Original databases/volumes and browser prototype data are not imported or erased. Uploaded files live in `backend/uploads`; head backups are deactivated copies in the ordinary head tree. Back up **both** the database and uploads folder together. Removing an attachment from a draft does not erase its stored file; shared/versioned media are retained rather than deleted behind another record's back.
-
-The backend separates resource routes, sessions, attachments, validation, and accounting rules. Resource APIs provide explicit endpoints for users, external users, contracts, transactions, heads and preferences; the original frontend API remains compatible. Transaction resource reads support bounded pagination. There is no ORM, worker queue or cache layer. See [backend/README.md](backend/README.md) for endpoints, authorization and verification, and [database/README.md](database/README.md) for schema decisions.
-
-Backend tests cover API compatibility, authorization, contracts, attachments and safe failures. CI runs those tests plus accounting flows against a disposable PostgreSQL service before deployment. Production builds, syntax checks and HTTP/container health checks remain in place. See the backend README for local test commands and isolation requirements.
+GitHub Actions runs frontend, backend, database, and desktop/mobile browser checks before deployment. Production uses HTTPS and private attachment storage. Keep credentials out of Git and back up the database together with its media.
