@@ -1,4 +1,4 @@
-# Cashbook
+# Transaction Management System
 
 A cashbook for company accounts, users, external receipts, and contracts—with images, voice notes, and printable statements. Built with React, FastAPI, and PostgreSQL, with a responsive interface for desktop and mobile.
 
