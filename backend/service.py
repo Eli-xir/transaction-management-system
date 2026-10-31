@@ -106,8 +106,21 @@ def ledger(db, user_id=None, credits_only=False, *, limit=None, offset=0, transa
     allocation_rows = db.execute('SELECT * FROM receipt_allocations WHERE version_id=ANY(%s) ORDER BY position',
                                  ([v['version_id'] for v in versions],)).fetchall()
     by_allocation = {}
+    by_details = {a['version_id']: a['details'] for a in allocation_rows if a['kind'] == 'details'}
+    custom_ids = list({aid for details in by_details.values() for fields in details.values() for kind in ('images','voice') for aid in (fields.get(kind) or [])})
+    custom_media = {r['attachment_id']: attachment(r) for r in db.execute('SELECT * FROM attachments WHERE attachment_id=ANY(%s)', (custom_ids,)).fetchall()}
+    public_details = {}
+    for version_id, details in by_details.items():
+        public_details[version_id] = {}
+        for key, fields in details.items():
+            public_fields = {'description': fields.get('description')}
+            for kind in ('images', 'voice'):
+                public_fields[kind] = None if fields.get(kind) is None else [custom_media[aid] for aid in fields[kind]]
+            public_details[version_id][key] = public_fields
     allocated_amounts = {}
     for a in allocation_rows:
+        if a['kind'] == 'details':
+            continue
         allocated_amounts[a['version_id']] = allocated_amounts.get(a['version_id'], 0) + a['amount']
         by_allocation.setdefault(a['version_id'], []).append(dict(kind=a['kind'], contractId=str(a['contract_id']) if a['contract_id'] else None,
                                                                   contractName=a['contract_name'], amount=float(a['amount'])))
@@ -120,6 +133,7 @@ def ledger(db, user_id=None, credits_only=False, *, limit=None, offset=0, transa
             'contractId': str(v['contract_id']) if v.get('contract_id') else None,
             'contractName': v.get('contract_name', ''),
             'allocations': by_allocation.get(v['version_id'], []),
+            'portionDetails': public_details.get(v['version_id'], {}),
             'attachments': by_version.get(v['version_id'], [])})
     result = []
     version_amounts = {v['version_id']: v['transaction_amount'] for v in versions}
@@ -307,7 +321,7 @@ def validate_input(db, actor, value, user_id, submission=False, direct=False, al
     return ids
 
 
-def revise(db, entry, editor_id, action, value=None, attachment_ids=None, *, allocation_values=None):
+def revise(db, entry, editor_id, action, value=None, attachment_ids=None, *, allocation_values=None, portion_values=None):
     old = db.execute('SELECT * FROM transaction_versions WHERE version_id=%s', (entry['current_version_id'],)).fetchone()
     head_id = value.headId if value else entry['head_id']
     category_id = None if value else entry['category_group_id']
@@ -325,7 +339,7 @@ def revise(db, entry, editor_id, action, value=None, attachment_ids=None, *, all
             register(db, entry)
         elif entry['current_version_id']:
             metadata(db, entry)
-        copy_allocations(db, entry, version_id, value.amount if value else old['transaction_amount'], allocation_values)
+        copy_allocations(db, entry, version_id, value.amount if value else old['transaction_amount'], allocation_values, portion_values)
     if attachment_ids is None:
         attachment_ids = [r['attachment_id'] for r in db.execute('SELECT attachment_id FROM transaction_version_attachments WHERE version_id=%s', (entry['current_version_id'],)).fetchall()]
     for aid in attachment_ids:

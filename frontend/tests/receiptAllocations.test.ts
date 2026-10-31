@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Transaction } from '../src/pages/Admin/types.ts';
 import { contractBalance, contractContributions } from '../src/pages/Admin/utils/contractBalances.ts';
 import { ledgerReport, direction } from '../src/pages/Ledger/ledgerModel.ts';
-import { allocationLabel, contractStatementEntries, receiptStatementEntries } from '../src/pages/Ledger/receiptModel.ts';
+import { allocationLabel, contractStatementEntries, receiptStatementEntries, portionValues } from '../src/pages/Ledger/receiptModel.ts';
 
 const root: Transaction = { id: '1', userId: 'admin', createdBy: 'admin', creditUserId: 'payer', headId: null,
   amount: 1000, receiptKey: 'AB12CD34', active: true, createdAt: '2026-10-20T12:00:00Z', attachments: [], returnedAmount: 100,
@@ -73,4 +73,23 @@ test('Split rows preserve the full receipt, direct remainder, shared evidence an
   assert.equal(report.debit, 150);
   assert.equal(report.closing, 850);
   assert.deepEqual(receiptStatementEntries([normal]), [normal]);
+});
+
+
+test('Each portion inherits live parent fields until that individual field is customized', () => {
+  const image = { id: '1', kind: 'image' as const, name: 'receipt.jpg', url: '/image' };
+  const voice = { id: '2', kind: 'voice' as const, name: 'receipt.ogg', url: '/voice' };
+  const parent = { ...root, description: 'Receipt note', attachments: [image, voice], portionDetails: { profit: { description: 'Profit note', images: [] } } };
+  const profit = portionValues(parent, 'profit');
+  assert.equal(profit.description, 'Profit note');
+  assert.deepEqual(profit.attachments, [voice]);
+  const changed = { ...parent, description: 'Changed receipt', attachments: [image] };
+  assert.equal(portionValues(changed, 'profit').description, 'Profit note');
+  assert.deepEqual(portionValues(changed, 'profit').attachments, []);
+  assert.equal(portionValues(changed, 'contract:a').description, 'Changed receipt');
+  assert.deepEqual(portionValues(changed, 'contract:a').attachments, [image]);
+  assert.equal(receiptStatementEntries([parent]).find(r => r.sourcePortionKey === 'profit')?.description, 'Profit note');
+  assert.equal(contractStatementEntries([parent], 'a')[0].description, 'Receipt note');
+  assert.equal(portionValues({ ...parent, portionDetails: { profit: { description: '', images: null, voice: [] } } }, 'profit').description, '');
+  assert.deepEqual(portionValues({ ...parent, portionDetails: {} }, 'profit').attachments, [image, voice]);
 });

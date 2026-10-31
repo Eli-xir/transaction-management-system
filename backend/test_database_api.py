@@ -350,6 +350,31 @@ class DatabaseApiTests(unittest.TestCase):
         keep = self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(reduced), 'allocations': [*values[:2], {'kind': 'profit', 'amount': '300'}]})
         self.call(self.admin, 'PUT', url, {**body, 'expectedVersion': version(keep), 'allocations': [{**values[0], 'amount': '301'}, values[1]]}, 400)
 
+        # Per-field overrides inherit until explicitly customized, including empties.
+        latest = self.call(self.admin, 'GET', f'/api/transactions/{rid}')
+        custom_voice = self.admin.post('/api/attachments', headers={'X-Cashbook': '1'}, data={'kind': 'voice'}, files={'file': ('portion.ogg', b'OggS'+b'x'*30, 'audio/ogg')})
+        self.assertEqual(custom_voice.status_code, 200, custom_voice.text)
+        custom = {'profit': {'description': 'Profit only', 'images': [upload.json()], 'voice': [custom_voice.json()]}, 'direct': {'description': '', 'images': [], 'voice': []}}
+        custom_body = {**body, 'expectedVersion': version(latest), 'allocations': [*values[:2], {'kind': 'profit', 'amount': '300'}], 'portionDetails': custom}
+        self.call(self.user, 'PUT', url, custom_body, 403)
+        self.call(self.admin, 'PUT', url, {**custom_body, 'portionDetails': {'other-receipt': custom['profit']}}, 400)
+        self.call(self.admin, 'PUT', url, {**custom_body, 'portionDetails': {'profit': {'images': [custom_voice.json()]}}}, 400)
+        customized = self.call(self.admin, 'PUT', url, custom_body)
+        self.assertEqual(customized['portionDetails']['profit']['description'], 'Profit only')
+        self.assertEqual(customized['portionDetails']['profit']['images'][0]['id'], upload.json()['id'])
+        self.assertEqual(customized['portionDetails']['direct']['images'], [])
+        self.assertEqual(customized['attachments'], root['attachments'])
+        self.assertEqual(customized['versions'][0]['portionDetails'], {})
+        self.call(self.user, 'GET', f"/api/attachments/{custom_voice.json()['id']}", expected=404)
+        changed_parent = self.call(self.admin, 'PUT', f'/api/transactions/{rid}', {'expectedVersion': version(customized), 'input': {**receipt_input, 'description': 'Updated receipt', 'attachments': []}})
+        self.assertEqual(changed_parent['description'], 'Updated receipt')
+        self.assertEqual(changed_parent['attachments'], [])
+        self.assertEqual(changed_parent['portionDetails'], customized['portionDetails'])
+        self.assertEqual(changed_parent['versions'][-2]['description'], receipt_input['description'])
+        restored_details = self.call(self.admin, 'PUT', url, {**custom_body, 'expectedVersion': version(changed_parent), 'portionDetails': {}})
+        self.assertEqual(restored_details['portionDetails'], {})
+        self.assertEqual(restored_details['versions'][-2]['portionDetails'], customized['portionDetails'])
+
 
 if __name__ == '__main__':
     unittest.main()

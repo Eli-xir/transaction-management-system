@@ -12,7 +12,8 @@ from uuid import UUID
 
 from pydantic import Field
 
-from models import Model, RecordId, TransactionInput
+from models import Model, RecordId, TransactionInput, AttachmentRef
+from psycopg.types.json import Jsonb
 
 
 class Allocation(Model):
@@ -21,14 +22,26 @@ class Allocation(Model):
     amount: Decimal = Field(gt=0, le=999999999999.99, max_digits=18, decimal_places=2, allow_inf_nan=False)
 
 
+class PortionDetails(Model):
+    description: str | None = Field(default=None, max_length=4000)
+    images: list[AttachmentRef] | None = Field(default=None, max_length=1000)
+    voice: list[AttachmentRef] | None = Field(default=None, max_length=1000)
+
+
 class EditReceipt(Model):
     expectedVersion: RecordId
     input: TransactionInput
     allocations: list[Allocation] = Field(max_length=200)
+    portionDetails: dict[str, PortionDetails] | None = Field(default=None, max_length=201)
 
 
 def allocations(db, version_id):
-    return db.execute('SELECT * FROM receipt_allocations WHERE version_id=%s ORDER BY position', (version_id,)).fetchall()
+    return db.execute("SELECT * FROM receipt_allocations WHERE version_id=%s AND kind IN ('contract','profit') ORDER BY position", (version_id,)).fetchall()
+
+
+def portion_details(db, version_id):
+    row = db.execute("SELECT details FROM receipt_allocations WHERE version_id=%s AND kind='details'", (version_id,)).fetchone()
+    return row['details'] if row else {}
 
 
 def metadata(db, entry):
@@ -61,7 +74,7 @@ def returned(db, receipt_id, excluding=None):
         AND (%s::integer IS NULL OR t.transaction_id<>%s)''', (receipt_id, excluding, excluding)).fetchone()['amount']
 
 
-def copy_allocations(db, entry, version_id, amount, values=None):
+def copy_allocations(db, entry, version_id, amount, values=None, details=None):
     """Every version carries an allocation snapshot, including status changes."""
     from service import require
     if not entry.get('credit_user_id') or entry.get('receipt_parent_id'):
@@ -76,6 +89,11 @@ def copy_allocations(db, entry, version_id, amount, values=None):
     for index, value in enumerate(values):
         db.execute('INSERT INTO receipt_allocations(transaction_id,version_id,position,kind,contract_id,contract_name,amount) VALUES (%s,%s,%s,%s,%s,%s,%s)',
                    (entry['transaction_id'], version_id, index, value['kind'], value['contract_id'], value['contract_name'], value['amount']))
+    if details is None:
+        details = portion_details(db, entry['current_version_id'])
+    if details:
+        db.execute("INSERT INTO receipt_allocations(transaction_id,version_id,position,kind,details) VALUES (%s,%s,200,'details',%s)",
+                   (entry['transaction_id'], version_id, Jsonb(details)))
 
 
 def original(db, actor, receipt_id, expected):
@@ -113,7 +131,27 @@ def edit(db, actor, receipt_id, value):
             'Reactivate this receipt before changing its allocations.')
     # The legacy field is only meaningful for a receipt allocated entirely to one contract.
     entry['contract_id'] = rows[0]['contract_id'] if len(rows) == 1 and rows[0]['kind'] == 'contract' and rows[0]['amount'] == value.input.amount else None
-    revise(db, entry, actor['user_id'], 'Receipt and allocations edited', value.input, ids, allocation_values=rows)
+    allowed = {'direct'} | {f"contract:{r['contract_id']}" if r['contract_id'] else 'profit' for r in rows}
+    details = {key: fields for key, fields in portion_details(db, entry['current_version_id']).items() if key in allowed}
+    if value.portionDetails is not None:
+        require(sum(len(media or []) for fields in value.portionDetails.values() for media in (fields.images, fields.voice)) <= 1000,
+                'Use no more than 1,000 attachments across the receipt portions.')
+        require(set(value.portionDetails) <= allowed, 'Choose a portion of this receipt before editing its details.')
+        details = {}
+        for key, custom in value.portionDetails.items():
+            saved = {'description': custom.description}
+            for field, type_id in [('images', 1), ('voice', 2)]:
+                media = getattr(custom, field)
+                saved[field] = None
+                if media is not None:
+                    media_ids = validate_input(db, actor, TransactionInput(amount=0, attachments=media), entry['user_id'], direct=True)
+                    for aid in media_ids:
+                        require(db.execute('SELECT 1 FROM attachments WHERE attachment_id=%s AND attachment_type_id=%s', (aid, type_id)).fetchone(), 'Choose the correct attachment type for this portion.')
+                        db.execute('UPDATE attachments SET is_submitted=true WHERE attachment_id=%s', (aid,))
+                    saved[field] = media_ids
+            if any(v is not None for v in saved.values()):
+                details[key] = saved
+    revise(db, entry, actor['user_id'], 'Receipt and allocations edited', value.input, ids, allocation_values=rows, portion_values=details)
     result = ledger(db, transaction_id=receipt_id)[0]
     db.commit()
     return result

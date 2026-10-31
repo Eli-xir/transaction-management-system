@@ -99,7 +99,10 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
   const userName = (id: string) => id.startsWith('credit:')
     ? data?.creditUsers.find((user) => user.credit_user_id === id.slice(7))?.user_name ?? 'Unavailable external user'
     : data?.users.find((user) => user.user_id === id)?.user_name ?? 'Unavailable account';
-  const openEntry = (entry: Transaction) => setSelected(data?.transactions.find((original) => original.id === (entry.sourceTransactionId ?? entry.id)) ?? entry);
+  const openEntry = (entry: Transaction, wholeReceipt = false) => {
+    const original = data?.transactions.find((original) => original.id === (entry.sourceTransactionId ?? entry.id)) ?? entry;
+    setSelected({ ...original, focusedPortionKey: wholeReceipt ? undefined : entry.sourcePortionKey });
+  };
   const entryUserName = (entry: Transaction) => entry.creditUserId
     ? data?.creditUsers.find((user) => user.credit_user_id === entry.creditUserId)?.user_name ?? 'Unavailable external user'
     : company && (data?.users ?? users).some((user) => user.user_id === entry.userId && user.role === 'admin')
@@ -198,7 +201,7 @@ export function Ledger({ filters: suppliedFilters, revision, heads, users, onDir
           return <tr ref={rowEntry && rowEntry.id === report.rows.at(-1)?.entry.id ? lastEntry : undefined} key={rowEntry ? `transaction:${rowEntry.id}` : `total:${index}`} className={rowEntry ? `ledger-entry${selectedIds.has(rowEntry.id) ? ' entry-selected' : ''}` : 'ledger-total'} onClick={(event) => { if (rowEntry) { if (selectionActive) toggleSelection(rowEntry.id, event.shiftKey); else openEntry(rowEntry); } }}>
             {selectionActive && <td>{rowEntry && <input type="checkbox" aria-label={`Select entry ${rowEntry.id}`} checked={selectedIds.has(rowEntry.id)} onClick={(event) => { event.stopPropagation(); toggleSelection(rowEntry.id, event.shiftKey); }} onChange={() => {}} />}</td>}
             {cells.map((value, column) => <td key={column} className={column >= 5 ? 'ledger-amount' : undefined}>{column === 0 && rowEntry && !selectionActive ? <button className="ledger-row-link" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>{value}</button> : typeof value === 'number' ? money(value) : value}
-              {column === 4 && rowEntry?.sourceTransactionId && rowEntry.receiptKey && !selectionActive && <button className="btn" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry); }}>{rowEntry.receiptKey}</button>}
+              {column === 4 && rowEntry?.sourceTransactionId && rowEntry.receiptKey && !selectionActive && <button className="btn" onClick={(event) => { event.stopPropagation(); openEntry(rowEntry, true); }}>{rowEntry.receiptKey}</button>}
             </td>)}
           </tr>;
         })}

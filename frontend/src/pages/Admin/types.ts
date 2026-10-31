@@ -95,12 +95,16 @@ export interface Attachment { id: string; kind: 'image' | 'voice'; name: string;
 export interface ReferenceType { id: number; name: string; }
 export interface TransactionInput { amount: number; description?: string; headId: number | null; attachments: Attachment[]; transactionTypeId?: number; }
 export interface TransactionRevision extends TransactionInput {
+  portionDetails?: Record<string, PortionDetails>;
   allocations?: ReceiptAllocation[];
   contractId?: string | null; contractName?: string;
   versionId: string; recordedAt: string; editorId: string; action: string; active: boolean;
   headPath?: string;
 }
 export interface Transaction extends TransactionInput {
+  sourcePortionKey?: string;
+  focusedPortionKey?: string;
+  portionDetails?: Record<string, PortionDetails>;
   sourceTransactionId?: string;
   receiptKey?: string | null;
   receiptParentId?: string | null;
@@ -113,6 +117,7 @@ export interface Transaction extends TransactionInput {
   headPath?: string;
 }
 export interface ReceiptAllocation { kind: 'contract' | 'profit'; contractId?: string | null; contractName?: string; amount: number; }
+export interface PortionDetails { description?: string | null; images?: Attachment[] | null; voice?: Attachment[] | null; }
 export interface AppSession { userId: string; role: 'admin' | 'user'; }
 export interface AccountTotals { totalReceived: number; totalBillPayment: number; remainingPayable: number; }
 export interface UserOverview extends AccountTotals { balance: number; credits: Transaction[]; }

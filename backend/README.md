@@ -240,3 +240,24 @@ skipped unless `CASHBOOK_TEST_DATABASE_URL` is explicitly set, refuses a nonloca
 or nonempty database, and never uses the application DATABASE_URL. The file
 contains commands to create and remove a temporary test container. CI runs it
 against a fresh PostgreSQL service.
+
+
+### Portion details and inheritance
+
+`PUT /api/receipts/{id}/allocations` also accepts optional `portionDetails`,
+keyed by `contract:<uuid>`, `profit`, or `direct`. Each portion accepts
+`description`, `images`, and `voice`. Null means inherit that field from the
+receipt; empty text or an empty attachment list intentionally clears it for
+that portion. Media references use the existing attachment input shape. The
+server validates ownership/access and actual media type and persists only IDs.
+Omitting the map preserves existing details for retained portions; an empty
+map restores inheritance for every portion.
+
+Migration013 extends only `receipt_allocations`. A `details` row at position200
+stores an immutable detail snapshot for each transaction version, separate from
+financial allocations at positions0..199. Detail rows never enter contract or
+cash totals. Customized uploads are marked submitted and retained like other
+immutable evidence; any future cleanup must account for these ID references.
+The statement projections resolve inherited fields at read time and apply custom
+fields to statements, attachment review, previews and exports. Common receipt
+edits leave custom fields intact. Ordinary-user workflows are unaffected.

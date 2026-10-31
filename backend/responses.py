@@ -47,6 +47,12 @@ class AllocationResource(BaseModel):
     amount: float
 
 
+class PortionDetailsResource(BaseModel):
+    description: str | None = None
+    images: list[AttachmentResource] | None = None
+    voice: list[AttachmentResource] | None = None
+
+
 class TransactionValues(BaseModel):
     amount: float
     headId: int | None
@@ -58,6 +64,7 @@ class TransactionValues(BaseModel):
     contractName: str
     attachments: list[AttachmentResource]
     allocations: list[AllocationResource] = Field(default_factory=list)
+    portionDetails: dict[str, PortionDetailsResource] = Field(default_factory=dict)
 
 
 class TransactionVersion(TransactionValues):

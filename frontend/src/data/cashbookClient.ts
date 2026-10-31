@@ -1,5 +1,5 @@
 import type { AppSession, Attachment, ReferenceType, CreateUserInput, CashbookData, StagedChange,
-  Transaction, TransactionInput, UserAction, UserOverview, UserProfile, ContractInput, AdminUser, CreditUser, Contract, Head, ReceiptAllocation } from '../pages/Admin/types.ts';
+  Transaction, TransactionInput, UserAction, UserOverview, UserProfile, ContractInput, AdminUser, CreditUser, Contract, Head, ReceiptAllocation, PortionDetails } from '../pages/Admin/types.ts';
 import { ApiError } from './apiRequest.ts';
 import type { ApiRequest, ReadSnapshot } from './apiRequest.ts';
 import { prepareAttachment } from './prepareAttachment.ts';
@@ -136,8 +136,8 @@ export function createCashbookApi(request: ApiRequest, onSavedRefreshFailure?: (
     editTransaction: (id: string, input: TransactionInput, expectedVersion: string, contractId?: string) =>
       write<Transaction>(`/transactions/${idPath(id)}`, 'PUT', { input, expectedVersion: Number(expectedVersion), contractId }),
     readTransaction: (id: string) => request<Transaction>(`/transactions/${idPath(id)}`),
-    editReceipt: (id: string, input: TransactionInput, expectedVersion: string, allocations: ReceiptAllocation[]) =>
-      write<Transaction>(`/receipts/${idPath(id)}/allocations`, 'PUT', { input, expectedVersion: Number(expectedVersion), allocations: allocations.map(({ kind, contractId, amount }) => ({ kind, contractId: contractId || null, amount })) }),
+    editReceipt: (id: string, input: TransactionInput, expectedVersion: string, allocations: ReceiptAllocation[], portionDetails?: Record<string, PortionDetails>) =>
+      write<Transaction>(`/receipts/${idPath(id)}/allocations`, 'PUT', { input, expectedVersion: Number(expectedVersion), allocations: allocations.map(({ kind, contractId, amount }) => ({ kind, contractId: contractId || null, amount })), portionDetails }),
     transactionAction: async (id: string, action: 'deactivate' | 'reactivate' | 'delete', expectedVersion: string) => {
       if (action === 'delete') { await write(`/transactions/${idPath(id)}?expectedVersion=${Number(expectedVersion)}`, 'DELETE'); return null; }
       return write<Transaction>(`/transactions/${idPath(id)}/status`, 'PUT', { active: action === 'reactivate', expectedVersion: Number(expectedVersion) });

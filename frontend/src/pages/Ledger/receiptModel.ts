@@ -17,7 +17,14 @@ export function unallocatedAmount(amount: number, allocations: ReceiptAllocation
 
 export function contractStatementEntries(entries: Transaction[], contractId: string) {
   return entries.filter((entry) => contractAmount(entry, contractId) > 0)
-    .map((entry) => ({ ...entry, amount: contractAmount(entry, contractId) }));
+    .map((entry) => ({ ...portionValues(entry, `contract:${contractId}`), sourcePortionKey: `contract:${contractId}`, amount: contractAmount(entry, contractId) }));
+}
+
+export function portionValues(entry: Transaction, key: string): Transaction {
+  const custom = entry.portionDetails?.[key];
+  if (!custom) return entry;
+  return { ...entry, description: custom?.description ?? entry.description,
+    attachments: [...(custom?.images ?? entry.attachments.filter(a => a.kind === 'image')), ...(custom?.voice ?? entry.attachments.filter(a => a.kind === 'voice'))] };
 }
 
 // Display portions of one receipt; never persist additional cash transactions.
@@ -27,8 +34,10 @@ export function receiptStatementEntries(entries: Transaction[]) {
     const allocations = receiptAllocations(entry);
     const remaining = unallocatedAmount(entry.amount, allocations);
     const parts = [...allocations, ...(remaining > 0 ? [{ kind: 'direct' as const, amount: remaining }] : [])];
-    if (parts.length <= 1) return [entry];
-    return parts.map((part, index) => ({ ...entry, id: `${entry.id}:part:${index}`, sourceTransactionId: entry.id,
+    if (!parts.length) return [entry];
+    return parts.map((part, index) => ({ ...portionValues(entry, part.kind === 'contract' ? `contract:${part.contractId}` : part.kind),
+      sourcePortionKey: part.kind === 'contract' ? `contract:${part.contractId}` : part.kind,
+      id: parts.length > 1 ? `${entry.id}:part:${index}` : entry.id, sourceTransactionId: parts.length > 1 ? entry.id : undefined,
       amount: part.amount, contractId: part.kind === 'contract' ? part.contractId : null,
       allocations: part.kind === 'direct' ? [] : [part], returnedAmount: 0 }));
   });

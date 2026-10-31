@@ -49,6 +49,10 @@ class ReceiptMigrationTests(unittest.TestCase):
                 allocated = [r for r in rows if r['kind'] == 'contract']
                 self.assertEqual([(r['version_id'], r['amount'], r['contract_name']) for r in allocated], [(2, 100, 'Old project name'), (3, 50, 'Project')])
                 self.assertEqual(connection.execute('SELECT max(version) AS version FROM schema_version').fetchone()['version'], 12)
+                connection.execute((Path(__file__).parent.parent / 'database/migrations/013_receipt_portion_details.sql').read_text())
+                self.assertEqual(snapshot(), before)
+                self.assertEqual(connection.execute('SELECT max(version) AS version FROM schema_version').fetchone()['version'], 13)
+                self.assertTrue(all(r['details'] == {} for r in connection.execute('SELECT details FROM receipt_allocations').fetchall()))
             finally:
                 # Roll back the entire private schema; never reset shared tables.
                 connection.rollback()
