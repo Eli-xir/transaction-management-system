@@ -49,8 +49,8 @@ const cards = [
   { id: 'statement', title: 'Users Statement', icon: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h2', tone: 'green' },
   { id: 'heads', title: 'Heads Management', icon: 'M3 6h6l2 2h10v12H3zM3 6V4h6l2 2M8 12h8M8 16h5', tone: 'purple' },
   { id: 'credit', title: 'Admin credit', icon: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5', tone: 'green' },
-  { id: 'user-credit', title: 'User credit', icon: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5', tone: 'green' },
-  { id: 'debit', title: 'Admin debit', icon: 'M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5', tone: 'gold' },
+  { id: 'user-credit', title: 'Admin debit', icon: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5', tone: 'green' },
+  { id: 'debit', title: 'User debit', icon: 'M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5', tone: 'gold' },
 ] as const;
 type HeadMode = 'manage' | 'preview' | 'permissions';
 type Page = 'home' | 'credit' | 'debit' | 'contract' | typeof cards[number]['id'];

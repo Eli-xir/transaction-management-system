@@ -15,7 +15,7 @@ export function AdminDebitFlow({ users, heads, onClose, onSubmitted, onDirtyChan
   const [userId, setUserId] = useState(initialUserId);
   const [paymentMode, setPaymentMode] = useState<'debit' | 'personal-pay'>('debit');
   const activeMode = mode === 'debit' && !initialUserId ? paymentMode : mode;
-  const label = activeMode === 'credit' ? 'User credit' : activeMode === 'personal-add' ? 'Add Admin payable' : activeMode === 'personal-pay' ? 'Pay Admin payable' : 'Admin debit';
+  const label = activeMode === 'credit' ? 'Admin debit' : activeMode === 'personal-add' ? 'Add Admin payable' : activeMode === 'personal-pay' ? 'Pay Admin payable' : 'User debit';
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [discard, setDiscard] = useState(false);
