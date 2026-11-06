@@ -9,7 +9,7 @@ A cashbook for company accounts, users, external receipts, and contracts—with 
 | Home | Balance overview, rearrangeable action cards, and pinned accounts. |
 | Users & access | Normal and external users, profiles, multiple contacts, account status, passwords, head permissions, and a safe user preview. |
 | Head management | Nested heads, search, transaction permissions, staged edits/moves/merges, backups, and undo/redo before Apply. |
-| Entry workflows | User debit for payments, User credit for bills recorded on a user’s behalf, and Admin credit for external receipts. Images, voice, description, and review steps keep evidence with entries. |
+| Entry workflows | Admin debit for payments, User debit for bills recorded on a user’s behalf, and Admin credit for external receipts. Images, voice, description, and review steps keep evidence with entries. |
 | Statements | Company and user statements; date/time, user, head/contract, and description filters; credit/debit views, ordering, carry-forward balances, and scroll to last. |
 | Selection & reports | Select individual entries or ranges, unselect them, preview, print, export PDF/Excel/CSV, share supported files, or export attachments only. |
 | Attachments | Camera/gallery/file uploads, voice recording and audio uploads, head-wise browsing, image previews, and image-only PDFs. |

@@ -370,7 +370,7 @@ test('bill submission sends only transaction input; server determines the signed
   assert.equal(writes(calls).length, 1);
 });
 
-test('admin User credit records a bill for the selected user without changing the signed-in session', async () => {
+test('admin User debit records a bill for the selected user without changing the signed-in session', async () => {
   const bill = { ...transaction, createdBy: workerId };
   const { api, calls } = harness({ respond: (call) => call.path === `/users/${workerId}/bills` ? bill : undefined });
   assert.deepEqual(await api.recordUserBill(workerId, input), bill);

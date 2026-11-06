@@ -102,7 +102,7 @@ attachments?:[{id,kind,name,url}]}`. Only attachment IDs are authoritative;
 display names, kinds and URLs supplied in this reference cannot replace stored
 metadata. Regular-user uploads must belong to that user and be unused.
 
-Home's User credit is an explicit admin bill-entry flow, separate from User debit
+Home's User debit is an explicit admin bill-entry flow, separate from Admin debit
 (direct payments) and Admin credit (external receipts). It does not create or
 replace a user session. Bills retain the existing owner/creator accounting
 discriminator so balances, company cash statements and regular-user visibility
