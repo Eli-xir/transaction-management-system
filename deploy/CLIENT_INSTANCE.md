@@ -18,7 +18,7 @@ The private runtime credential file is deploy/secrets/aws_credentials, owned by 
 
 GitHub's production environment uses DEPLOY_HOST=52.220.117.224 and a new dedicated SSH key restricted to /usr/local/bin/cashbook-ci. DEPLOY_KNOWN_HOSTS pins this server. The old server's deployment key was revoked; its administrative key still works.
 
-Verified end-to-end GitHub Actions deployment: https://github.com/Eli-xir/chashbook_management_system/actions/runs/37409497605. The workflow built and deployed the checked commit, uploaded a pre-migration backup, initialized the schema and passed HTTPS checks. The installed systemd backup service also completed successfully. Keep environment files and SSH secrets in LF format; Windows CRLF caused initial deployment checks to fail.
+Verified end-to-end GitHub Actions deployment: https://github.com/Eli-xir/transaction-management-system/actions/runs/37409497605. The workflow built and deployed the checked commit, uploaded a pre-migration backup, initialized the schema and passed HTTPS checks. The installed systemd backup service also completed successfully. Keep environment files and SSH secrets in LF format; Windows CRLF caused initial deployment checks to fail.
 
 Apache's previous OpenClaw routing was disabled to free ports 80/443. Its configuration was preserved in /opt/cashbook/recovery/apache-before-cashbook.tar.gz; OpenClaw itself was not removed.
 
