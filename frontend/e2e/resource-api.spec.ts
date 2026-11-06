@@ -444,7 +444,7 @@ test('a saved external user leaves the create form before a failed refresh and c
   expect(uiRequests.filter((request) => request === 'POST /api/external-users')).toHaveLength(1);
 });
 
-test('Home User credit records a bill on behalf of a user while User debit remains a direct payment', async ({ page }) => {
+test('Home Admin debit records a bill on behalf of a user while User debit card remains a direct payment', async ({ page }) => {
   const session = await call(api, 'GET', '/session');
   const administrator = await call(api, 'GET', `/users/${session.userId}`);
   const target = await call(api, 'POST', '/users', { profile: {
@@ -478,7 +478,7 @@ test('Home User credit records a bill on behalf of a user while User debit remai
   await expect(page.locator('[data-home-card="user-credit"]')).toBeVisible();
 
   await home(page, 'user-credit');
-  await expect(page.getByRole('heading', { name: 'User credit', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Admin debit', exact: true })).toBeVisible();
   await expect(accountCard(page, inactive.user_name)).toHaveCount(0);
   await expect(accountCard(page, administrator.user_name)).toHaveCount(0);
   await page.getByRole('searchbox', { name: 'Search users', exact: true }).fill(target.user_name);
