@@ -175,7 +175,7 @@ def overview(db, user_id):
         COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id<>t.user_id),0) AS received,
         COALESCE(sum(v.transaction_amount) FILTER (WHERE t.created_by_user_id=t.user_id),0) AS bills
         FROM transactions t JOIN transaction_versions v ON v.version_id=t.current_version_id
-        WHERE t.user_id=%s AND t.is_active''', (user['user_id'],)).fetchone()
+        WHERE t.user_id=%s AND t.is_active AND v.transaction_type_id=1''', (user['user_id'],)).fetchone()
     received, bills = amounts['received'], amounts['bills']
     return {'balance': float(received-bills), 'totalReceived': float(received), 'totalBillPayment': float(bills),
             'remainingPayable': float(bills-received), 'credits': list(reversed(ledger(db, user_id, True)))}
