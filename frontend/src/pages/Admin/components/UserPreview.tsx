@@ -187,8 +187,8 @@ export function UserPreview({ user, heads, assigned, pending, onClose, preview =
       {screen === 'home' && <>
         {success && <p role="status">{creditUser ? 'Credit recorded successfully.' : 'Transaction sent successfully.'}</p>}
         <article className="user-card-panel home-card--gold balance-card flex-col gap-sm">
-          <h2>{adminPayable ? 'Admin payable remaining' : creditUser ? `${creditUser.user_name} · Balance` : adminBill ? 'User’s total bills' : adminCredit ? user.role === 'admin' ? 'Company balance' : 'User’s remaining credits' : 'Remaining balance'}</h2>
-          <p className="balance-value"><span>{money(adminBill ? overview.totalBillPayment : overview.balance)}</span></p>
+          <h2>{adminPayable ? 'Admin payable remaining' : creditUser ? `${creditUser.user_name} · Balance` : adminCredit && user.role === 'admin' ? 'Company balance' : 'Remaining balance'}</h2>
+          <p className="balance-value"><span>{money(overview.balance)}</span></p>
         </article>
         <form className="flex-col gap-md" onSubmit={(event) => {
           event.preventDefault();

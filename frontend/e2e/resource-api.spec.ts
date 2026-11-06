@@ -483,7 +483,7 @@ test('Home Admin debit records a bill on behalf of a user while User debit card 
   await expect(accountCard(page, administrator.user_name)).toHaveCount(0);
   await page.getByRole('searchbox', { name: 'Search users', exact: true }).fill(target.user_name);
   await accountCard(page, target.user_name).locator('button.home-card-main').click();
-  await expect(page.getByRole('heading', { name: 'User’s total bills', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Remaining balance', exact: true })).toBeVisible();
   await page.getByLabel('Enter amount in PKR', { exact: true }).fill('125');
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(page.getByRole('button', { name: forbiddenHead, exact: true })).toHaveCount(0);
